@@ -83,3 +83,20 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
 </html>"""
     path.write_text(html, encoding="utf-8")
     return path
+
+
+def export_pdf(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
+    """Generate real PDF from HTML report."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    html_path = path.with_suffix(".html")
+    export_html(scan, findings, html_path)
+    html = html_path.read_text(encoding="utf-8")
+    try:
+        from xhtml2pdf import pisa
+        with path.open("wb") as pdf_file:
+            status = pisa.CreatePDF(html, dest=pdf_file, encoding="utf-8")
+        if status.err:
+            raise RuntimeError(f"PDF generation errors: {status.err}")
+    except ImportError as exc:
+        raise RuntimeError("Install xhtml2pdf: pip install xhtml2pdf") from exc
+    return path

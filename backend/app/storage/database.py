@@ -8,6 +8,19 @@ from uuid import uuid4
 
 from app.config import settings
 from app.models.schemas import Finding, IdentityProfile, ScanSummary
+from app.services.crypto import decrypt_text, encrypt_text
+
+
+def _store_profile(profile: IdentityProfile) -> str:
+    return encrypt_text(profile.model_dump_json())
+
+
+def _load_profile(raw: str) -> IdentityProfile:
+    return IdentityProfile.model_validate_json(decrypt_text(raw))
+
+
+def profile_from_row(row: dict | sqlite3.Row) -> IdentityProfile:
+    return _load_profile(row["profile_json"])
 
 
 def _connect() -> sqlite3.Connection:
@@ -73,7 +86,7 @@ def create_scan(profile: IdentityProfile, providers: list[str]) -> str:
             INSERT INTO scans (id, created_at, status, providers, profile_json)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (scan_id, now, "running", json.dumps(providers), profile.model_dump_json()),
+            (scan_id, now, "running", json.dumps(providers), _store_profile(profile)),
         )
         conn.commit()
     return scan_id
@@ -177,7 +190,7 @@ def _row_to_summary(row: sqlite3.Row) -> ScanSummary:
     return ScanSummary(
         id=row["id"],
         created_at=datetime.fromisoformat(row["created_at"]),
-        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+        profile=_load_profile(row["profile_json"]),
         status=row["status"],
         providers=json.loads(row["providers"]),
         finding_count=row["finding_count"],
@@ -237,3 +250,26 @@ def compare_scans(scan_a: str, scan_b: str):
         removed_findings=removed,
         unchanged_count=unchanged,
     )
+
+
+def risk_trends(limit: int = 20) -> list[dict]:
+    """Recent scans for dashboard trend chart."""
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, created_at, risk_score, finding_count, status
+            FROM scans WHERE status IN ('completed', 'cancelled')
+            ORDER BY created_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "created_at": r["created_at"],
+            "risk_score": r["risk_score"],
+            "finding_count": r["finding_count"],
+            "status": r["status"],
+        }
+        for r in reversed(rows)
+    ]

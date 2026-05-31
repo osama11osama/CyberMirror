@@ -47,11 +47,17 @@ from app.services.graph_builder import build_graph
 
 from app.services.logging_setup import setup_logging
 
-from app.services.report_exporter import export_csv, export_html, export_json
+from app.services.report_exporter import export_csv, export_html, export_json, export_pdf
 
-from app.services.runtime_settings import apply_runtime, load_runtime, save_runtime
+from app.services.auth import get_or_create_token
+
+from app.services.cache import clear_cache
+
+from app.services.runtime_settings import apply_runtime, get_enabled_modules, load_runtime, save_runtime
 
 from app.services.scheduler import start_scheduler
+
+from app.services.secrets import get_secret
 
 from app.storage.database import (
     compare_scans,
@@ -60,6 +66,8 @@ from app.storage.database import (
     get_scan,
     init_db,
     list_scans,
+    profile_from_row,
+    risk_trends,
     row_to_finding,
 )
 from app.modules.username.wmn_loader import wmn_status
@@ -114,6 +122,10 @@ def health():
 
         "wmn": wmn_status(),
 
+        "api_token": get_or_create_token() if settings.api_auth_enabled else None,
+
+        "encryption_enabled": settings.encryption_enabled,
+
     }
 
 
@@ -152,11 +164,11 @@ def get_settings():
 
         "default_modules": DEFAULT_MODULES,
 
-        "serpapi_key_set": bool(settings.serpapi_key),
+        "enabled_modules": get_enabled_modules(),
 
-        "hibp_api_key_set": bool(rt.get("hibp_api_key") or settings.hibp_api_key),
+        "hibp_api_key_set": bool(get_secret("hibp_api_key") or settings.hibp_api_key),
 
-        **rt,
+        **{k: v for k, v in rt.items() if k != "hibp_api_key"},
 
     }
 
@@ -182,6 +194,8 @@ def update_settings(body: SettingsUpdate):
 
         "schedule_enabled", "schedule_interval_hours", "cache_ttl_seconds",
 
+        "enabled_modules", "locale",
+
     ):
 
         val = getattr(body, field, None)
@@ -200,11 +214,33 @@ def update_settings(body: SettingsUpdate):
 
 
 
+@router.post("/cache/clear")
+
+def cache_clear():
+
+    deleted = clear_cache()
+
+    return {"cleared": deleted}
+
+
+
+
+
+@router.get("/dashboard/trends")
+
+def dashboard_trends(limit: int = Query(20, ge=2, le=100)):
+
+    return {"scans": risk_trends(limit)}
+
+
+
+
+
 @router.post("/scans")
 
 async def start_scan(body: ScanRequest, background_tasks: BackgroundTasks):
 
-    modules = body.providers or DEFAULT_MODULES
+    modules = body.providers or get_enabled_modules()
 
     if body.async_mode:
 
@@ -314,7 +350,7 @@ def scan_detail(scan_id: str):
 
         created_at=datetime.fromisoformat(row["created_at"]),
 
-        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+        profile=profile_from_row(row),
 
         status=row["status"],
 
@@ -478,7 +514,7 @@ def export_scan(scan_id: str, body: ExportRequest):
 
         created_at=datetime.fromisoformat(row["created_at"]),
 
-        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+        profile=profile_from_row(row),
 
         status=row["status"],
 
@@ -512,11 +548,7 @@ def export_scan(scan_id: str, body: ExportRequest):
 
     elif ext == "pdf":
 
-        html_path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.html"
-
-        export_html(summary, findings, html_path)
-
-        path = html_path
+        export_pdf(summary, findings, path)
 
     else:
 
@@ -550,7 +582,7 @@ def download_export(scan_id: str, format: str):
 
         created_at=datetime.fromisoformat(row["created_at"]),
 
-        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+        profile=profile_from_row(row),
 
         status=row["status"],
 
@@ -584,9 +616,7 @@ def download_export(scan_id: str, format: str):
 
     elif ext == "pdf":
 
-        export_html(summary, findings, path)
-
-        path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.html"
+        export_pdf(summary, findings, path)
 
     else:
 
@@ -608,7 +638,7 @@ def download_export(scan_id: str, format: str):
 
         "html": "text/html",
 
-        "pdf": "text/html",
+        "pdf": "application/pdf",
 
     }
 
@@ -630,7 +660,7 @@ def create_app():
 
     from fastapi import FastAPI
 
-
+    from app.services.auth import ApiTokenMiddleware
 
     init_db()
 
@@ -658,7 +688,13 @@ def create_app():
 
         allow_headers=["*"],
 
+    expose_headers=["*"],
+
     )
+
+    if settings.api_auth_enabled:
+
+        app.add_middleware(ApiTokenMiddleware)
 
     app.include_router(router)
 

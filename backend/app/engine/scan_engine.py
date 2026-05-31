@@ -14,10 +14,12 @@ from app.engine.job_store import (
     is_cancelled,
     update_job,
 )
+from app.engine.scan_context import ScanCancelled
 from app.models.schemas import Finding, IdentityProfile, ScanDetail, ScanStartResponse
 from app.modules.identity.correlator import correlate_findings
 from app.modules.registry import DEFAULT_MODULES, get_module
 from app.services.risk_engine import analyze_finding, compute_risk_score
+from app.services.runtime_settings import get_enabled_modules
 from app.storage.database import (
     create_scan,
     delete_findings_for_scan,
@@ -46,9 +48,15 @@ def dedupe_findings(findings: list[Finding]) -> list[Finding]:
     return unique
 
 
+def _resolve_modules(modules: list[str] | None) -> list[str]:
+    enabled = set(get_enabled_modules())
+    chosen = modules or get_enabled_modules() or DEFAULT_MODULES
+    return [m for m in chosen if m in enabled]
+
+
 class ScanEngine:
     def start_scan(self, profile: IdentityProfile, modules: list[str] | None = None) -> ScanStartResponse:
-        modules = modules or DEFAULT_MODULES
+        modules = _resolve_modules(modules)
         scan_id = create_scan(profile, modules)
         create_job(scan_id, modules)
         return ScanStartResponse(
@@ -86,7 +94,7 @@ class ScanEngine:
     async def run_scan(
         self, profile: IdentityProfile, modules: list[str] | None = None
     ) -> ScanDetail:
-        modules = modules or DEFAULT_MODULES
+        modules = _resolve_modules(modules)
         started = self.start_scan(profile, modules)
         await self.run_scan_background(started.id, profile, modules)
         data = get_scan(started.id)
@@ -141,22 +149,43 @@ class ScanEngine:
                 )
                 logger.info("Module %s: %d findings", module_id, len(batch))
                 return batch
+            except ScanCancelled:
+                logger.info("Module %s cancelled", module_id)
+                return []
             except Exception as exc:
                 logger.error("Module %s failed: %s", module_id, exc)
                 add_module_error(scan_id, module_id, str(exc))
                 completed += 1
                 return []
 
-        # Run independent modules in parallel
-        batches = await asyncio.gather(*[run_one(mid) for mid in parallel_ids])
+        tasks = {mid: asyncio.create_task(run_one(mid)) for mid in parallel_ids}
+        pending = set(tasks.values())
         all_findings: list[Finding] = []
-        for batch in batches:
-            all_findings.extend(batch)
+
+        while pending:
+            if is_cancelled(scan_id):
+                for task in pending:
+                    task.cancel()
+                break
+            done, pending = await asyncio.wait(
+                pending,
+                timeout=0.5,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in done:
+                try:
+                    batch = task.result()
+                    if batch:
+                        all_findings.extend(batch)
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    logger.error("Module task error: %s", exc)
 
         if is_cancelled(scan_id):
             return all_findings
 
-        if run_correlator:
+        if run_correlator and not is_cancelled(scan_id):
             update_job(scan_id, current_provider=CORRELATOR_ID, message="Correlating findings…")
             corr = correlate_findings(profile, all_findings, scan_id)
             for f in corr:

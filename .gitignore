@@ -12,8 +12,11 @@ frontend/.angular/
 desktop/out/
 *.log
 .cybermirror-pids.json
-data/cache/
-data/logs/
+data/runtime_settings.json
+data/secrets.json
+data/.encryption_key
+data/.api_token
+data/.setup_complete
 launcher/build/
 launcher/*.spec
 CyberMirror.exe

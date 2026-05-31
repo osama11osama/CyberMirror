@@ -1,4 +1,4 @@
-# CyberMirror v2.0.0
+# CyberMirror v2.1.0
 
 **See Yourself as the Internet Sees You**
 

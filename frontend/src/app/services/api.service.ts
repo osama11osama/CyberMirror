@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, interval, switchMap, takeWhile, last } from 'rxjs';
+import { Observable, interval, switchMap, takeWhile, last, tap } from 'rxjs';
+import { storeApiToken } from './auth.interceptor';
 
 const API = (window as any).cyberMirror?.apiBase ?? 'http://127.0.0.1:8787/api';
 
@@ -42,20 +43,22 @@ export interface ScanStartResponse {
   providers: string[];
 }
 
-export interface ScansPage {
-  items: any[];
-  total: number;
-}
-
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   constructor(private http: HttpClient) {}
 
-  health(): Observable<any> { return this.http.get(`${API}/health`); }
+  health(): Observable<any> {
+    return this.http.get<any>(`${API}/health`).pipe(
+      tap((h: any) => { if (h?.api_token) storeApiToken(h.api_token); })
+    );
+  }
+
   modules(): Observable<any[]> { return this.http.get<any[]>(`${API}/modules`); }
   providers(): Observable<any[]> { return this.modules(); }
   settings(): Observable<any> { return this.http.get(`${API}/settings`); }
   updateSettings(body: any): Observable<any> { return this.http.put(`${API}/settings`, body); }
+  clearCache(): Observable<any> { return this.http.post(`${API}/cache/clear`, {}); }
+  trends(limit = 20): Observable<any> { return this.http.get(`${API}/dashboard/trends`, { params: { limit } }); }
 
   startScan(body: ScanRequest): Observable<ScanStartResponse> {
     return this.http.post<ScanStartResponse>(`${API}/scans`, { ...body, async_mode: true });
@@ -105,6 +108,8 @@ export class ApiService {
   }
 
   exportDownloadUrl(id: string, format: string): string {
-    return `${API}/scans/${id}/export/${format}/download`;
+    const token = localStorage.getItem('cybermirror_api_token');
+    const base = `${API}/scans/${id}/export/${format}/download`;
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
   }
 }

@@ -1,10 +1,28 @@
 const { app, BrowserWindow, shell } = require("electron");
 const { spawn } = require("child_process");
+const http = require("http");
 const path = require("path");
 
 const BACKEND_PORT = 8787;
-const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
+const BACKEND_HEALTH = `http://127.0.0.1:${BACKEND_PORT}/api/health`;
 let backendProcess = null;
+
+function waitForBackend(timeoutMs = 90000) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = () => {
+      http.get(BACKEND_HEALTH, (res) => {
+        if (res.statusCode && res.statusCode < 500) return resolve(true);
+        retry();
+      }).on("error", retry);
+    };
+    const retry = () => {
+      if (Date.now() - start > timeoutMs) return reject(new Error("Backend timeout"));
+      setTimeout(tick, 1500);
+    };
+    tick();
+  });
+}
 
 function startBackend() {
   const backendDir = path.join(__dirname, "..", "backend");
@@ -56,9 +74,15 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   startBackend();
-  setTimeout(createWindow, 2000);
+  try {
+    await waitForBackend();
+    createWindow();
+  } catch (err) {
+    console.error(err);
+    createWindow();
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

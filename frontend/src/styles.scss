@@ -24,6 +24,13 @@
   --cm-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
 }
 
+html[dir='rtl'] {
+  .sidebar { border-right: none; border-left: 1px solid var(--cm-border); }
+  .nav-list a { text-align: right; }
+  .data-table th, .data-table td { text-align: right; }
+  .module-errors ul { padding-right: 1.25rem; padding-left: 0; }
+}
+
 * { box-sizing: border-box; }
 
 html, body {

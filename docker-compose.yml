@@ -1,0 +1,14 @@
+services:
+  cybermirror:
+    build: .
+    ports:
+      - "8787:8787"
+    volumes:
+      - cm-data:/app/data
+      - cm-exports:/app/exports
+    environment:
+      - CYBERMIRROR_ENCRYPTION_ENABLED=true
+
+volumes:
+  cm-data:
+  cm-exports:

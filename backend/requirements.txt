@@ -17,3 +17,7 @@ Pillow>=10.0.0
 # Tests
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
+
+# Security & PDF
+cryptography>=43.0.0
+xhtml2pdf>=0.2.16

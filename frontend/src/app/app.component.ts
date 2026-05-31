@@ -15,6 +15,7 @@ import { MatBadgeModule } from '@angular/material/badge';
 import { CommonModule } from '@angular/common';
 
 import { ApiService } from './services/api.service';
+import { I18nService } from './services/i18n.service';
 
 
 
@@ -60,7 +61,7 @@ import { ApiService } from './services/api.service';
 
             <mat-icon matListItemIcon>dashboard</mat-icon>
 
-            <span matListItemTitle>Dashboard</span>
+            <span matListItemTitle>{{ i18n.t('dashboard') }}</span>
 
           </a>
 
@@ -68,7 +69,7 @@ import { ApiService } from './services/api.service';
 
             <mat-icon matListItemIcon>manage_search</mat-icon>
 
-            <span matListItemTitle>Investigation</span>
+            <span matListItemTitle>{{ i18n.t('investigation') }}</span>
 
           </a>
 
@@ -76,7 +77,7 @@ import { ApiService } from './services/api.service';
 
             <mat-icon matListItemIcon>history</mat-icon>
 
-            <span matListItemTitle>History</span>
+            <span matListItemTitle>{{ i18n.t('history') }}</span>
 
           </a>
 
@@ -84,7 +85,7 @@ import { ApiService } from './services/api.service';
 
             <mat-icon matListItemIcon>tune</mat-icon>
 
-            <span matListItemTitle>Settings</span>
+            <span matListItemTitle>{{ i18n.t('settings') }}</span>
 
           </a>
 
@@ -98,11 +99,11 @@ import { ApiService } from './services/api.service';
 
             <span class="dot"></span>
 
-            {{ backendOk ? 'Backend connected' : 'Backend offline' }}
+            {{ backendOk ? i18n.t('backend_connected') : i18n.t('backend_offline') }}
 
           </div>
 
-          <small>Native Engine · v1.0</small>
+          <small>Native Engine · v2.1.0</small>
 
         </div>
 
@@ -114,13 +115,13 @@ import { ApiService } from './services/api.service';
 
         <mat-toolbar class="topbar">
 
-          <span class="topbar-title">OSINT Self-Audit Platform</span>
+          <span class="topbar-title">{{ i18n.t('platform_title') }}</span>
 
           <span class="spacer"></span>
 
           <span class="consent-badge">
 
-            <mat-icon>verified_user</mat-icon> Authorized use only
+            <mat-icon>verified_user</mat-icon> {{ i18n.t('authorized') }}
 
           </span>
 
@@ -246,12 +247,11 @@ export class AppComponent implements OnInit {
 
   backendOk = false;
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, public i18n: I18nService) {}
 
   ngOnInit() {
-
+    this.i18n.init();
     this.api.health().subscribe({ next: () => this.backendOk = true, error: () => this.backendOk = false });
-
   }
 
 }

@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { ApiService } from '../../services/api.service';
+import { I18nService } from '../../services/i18n.service';
 
 @Component({
   selector: 'cm-settings',
@@ -10,8 +11,8 @@ import { ApiService } from '../../services/api.service';
   imports: [CommonModule, FormsModule, MatIconModule],
   template: `
     <div class="page-header">
-      <h1>Settings</h1>
-      <p class="subtitle">Configure scan depth, browser engine, and scheduled rescans</p>
+      <h1>{{ i18n.t('settings') }}</h1>
+      <p class="subtitle">Configure scan depth, modules, security, and language</p>
     </div>
 
     <div class="grid">
@@ -20,23 +21,21 @@ import { ApiService } from '../../services/api.service';
         <div>
           <strong>WhatsMyName database not loaded</strong>
           <p>{{ wmnWarning }}</p>
-          <p class="muted">Set the correct path below to scan 600+ platforms.</p>
         </div>
       </div>
 
       <div class="card">
         <div class="card-header"><mat-icon>tune</mat-icon><h3>Scan Configuration</h3></div>
         <div class="form-field">
+          <label>{{ i18n.t('language') }}</label>
+          <select [(ngModel)]="locale" (ngModelChange)="setLocale($event)">
+            <option value="en">English</option>
+            <option value="ar">العربية</option>
+          </select>
+        </div>
+        <div class="form-field">
           <label>Username platforms limit</label>
           <input type="number" [(ngModel)]="cfg.username_scan_limit" min="50" max="800" />
-        </div>
-        <div class="form-field">
-          <label>Web search queries</label>
-          <input type="number" [(ngModel)]="cfg.web_search_max_queries" min="5" max="50" />
-        </div>
-        <div class="form-field">
-          <label>Results per query</label>
-          <input type="number" [(ngModel)]="cfg.web_search_results_per_query" min="3" max="15" />
         </div>
         <div class="form-field">
           <label>WMN data path</label>
@@ -48,19 +47,29 @@ import { ApiService } from '../../services/api.service';
         </div>
         <label class="check-row">
           <input type="checkbox" [(ngModel)]="cfg.playwright_enabled" />
-          Enable Playwright browser (Facebook, Instagram, LinkedIn)
+          Enable Playwright browser
         </label>
         <div class="form-field">
-          <label>HIBP API key (optional — for breach checks)</label>
-          <input [(ngModel)]="cfg.hibp_api_key" type="password" placeholder="Leave empty for web fallback" />
+          <label>HIBP API key (stored encrypted locally)</label>
+          <input [(ngModel)]="cfg.hibp_api_key" type="password" placeholder="Paste key — not shown after save" />
         </div>
         <button class="btn-primary" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save Settings' }}</button>
+        <button class="btn-secondary" style="margin-left:0.5rem" (click)="clearCache()">{{ i18n.t('clear_cache') }}</button>
         <p class="success" *ngIf="saved">Settings saved.</p>
+        <p class="success" *ngIf="cacheMsg">{{ cacheMsg }}</p>
       </div>
 
       <div class="card">
-        <div class="card-header"><mat-icon>schedule</mat-icon><h3>Scheduled Rescan</h3></div>
-        <p class="muted">Automatically rescan the last profile on an interval.</p>
+        <div class="card-header"><mat-icon>checklist</mat-icon><h3>{{ i18n.t('enabled_modules') }}</h3></div>
+        <p class="error" *ngIf="loadError">{{ loadError }}</p>
+        <label class="module-row" *ngFor="let m of modules">
+          <input type="checkbox" [checked]="isEnabled(m.id)" (change)="toggleModule(m.id)" />
+          <div>
+            <strong>{{ m.name }}</strong>
+            <small>{{ m.description }}</small>
+          </div>
+        </label>
+        <div class="card-header" style="margin-top:1.5rem"><mat-icon>schedule</mat-icon><h3>Scheduled Rescan</h3></div>
         <label class="check-row">
           <input type="checkbox" [(ngModel)]="cfg.schedule_enabled" />
           Enable scheduled scans
@@ -68,39 +77,28 @@ import { ApiService } from '../../services/api.service';
         <div class="form-field">
           <label>Interval (hours)</label>
           <input type="number" [(ngModel)]="cfg.schedule_interval_hours" min="24" />
-          <small class="muted">168 = weekly</small>
-        </div>
-
-        <div class="card-header" style="margin-top:1.5rem"><mat-icon>checklist</mat-icon><h3>Modules</h3></div>
-        <p class="error" *ngIf="loadError">{{ loadError }}</p>
-        <div class="module-row" *ngFor="let m of modules">
-          <strong>{{ m.name }}</strong>
-          <span class="active">● Active</span>
-          <small>{{ m.description }}</small>
         </div>
       </div>
     </div>
   `,
   styles: [`
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
-    .wmn-banner { grid-column: 1 / -1; display: flex; gap: 1rem; align-items: flex-start; background: rgba(210,153,34,0.12); border: 1px solid #d29922; }
-    .wmn-banner mat-icon { color: #d29922; }
+    .wmn-banner { grid-column: 1 / -1; display: flex; gap: 1rem; background: rgba(210,153,34,0.12); border: 1px solid #d29922; padding: 1rem; border-radius: 8px; }
     .form-field { margin-bottom: 1rem; }
     .form-field label { display: block; margin-bottom: 0.35rem; color: var(--cm-muted); font-size: 0.85rem; }
-    .form-field input { width: 100%; padding: 0.5rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); }
-    .check-row { display: flex; gap: 0.5rem; align-items: center; margin: 1rem 0; color: var(--cm-text); }
-    .muted { color: var(--cm-muted); font-size: 0.9rem; }
+    .form-field input, .form-field select { width: 100%; padding: 0.5rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); }
+    .check-row, .module-row { display: flex; gap: 0.75rem; align-items: flex-start; margin: 0.75rem 0; color: var(--cm-text); }
+    .module-row small { display: block; color: var(--cm-muted); margin-top: 4px; }
     .success { color: var(--cm-low); margin-top: 0.75rem; }
     .error { color: var(--cm-critical); }
-    .module-row { padding: 0.75rem 0; border-bottom: 1px solid var(--cm-border-light); }
-    .module-row small { display: block; color: var(--cm-muted); margin-top: 4px; }
-    .active { color: var(--cm-low); font-size: 0.85rem; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
   `],
 })
 export class SettingsComponent implements OnInit {
   modules: any[] = [];
   loadError = '';
+  locale = 'en';
+  cacheMsg = '';
   cfg: any = {
     username_scan_limit: 600,
     web_search_max_queries: 30,
@@ -111,33 +109,67 @@ export class SettingsComponent implements OnInit {
     schedule_enabled: false,
     schedule_interval_hours: 168,
     cache_ttl_seconds: 3600,
+    enabled_modules: [] as string[],
   };
   saving = false;
   saved = false;
   wmnWarning = '';
 
-  constructor(private api: ApiService) {}
+  constructor(private api: ApiService, public i18n: I18nService) {}
 
   ngOnInit() {
+    this.locale = this.i18n.locale;
     this.api.health().subscribe({
-      next: h => {
-        const wmn = h.wmn;
-        if (wmn && !wmn.loaded) this.wmnWarning = wmn.message || 'WMN file missing';
+      next: h => { if (h.wmn && !h.wmn.loaded) this.wmnWarning = h.wmn.message; },
+    });
+    this.api.settings().subscribe({
+      next: s => {
+        this.cfg = { ...this.cfg, ...s, hibp_api_key: '' };
+        if (!this.cfg.enabled_modules?.length) {
+          this.cfg.enabled_modules = this.modules.map((m: any) => m.id);
+        }
       },
     });
-    this.api.settings().subscribe({ next: s => this.cfg = { ...this.cfg, ...s } });
     this.api.modules().subscribe({
-      next: m => { if (m?.length) this.modules = m; },
+      next: m => {
+        if (m?.length) {
+          this.modules = m;
+          if (!this.cfg.enabled_modules?.length) {
+            this.cfg.enabled_modules = m.filter((x: any) => x.enabled !== false).map((x: any) => x.id);
+          }
+        }
+      },
       error: () => this.loadError = 'Backend offline',
     });
+  }
+
+  isEnabled(id: string) {
+    return (this.cfg.enabled_modules || []).includes(id);
+  }
+
+  toggleModule(id: string) {
+    const list: string[] = [...(this.cfg.enabled_modules || [])];
+    const i = list.indexOf(id);
+    if (i >= 0) list.splice(i, 1); else list.push(id);
+    this.cfg.enabled_modules = list;
+  }
+
+  setLocale(loc: 'en' | 'ar') {
+    this.i18n.setLocale(loc);
   }
 
   save() {
     this.saving = true;
     this.saved = false;
-    this.api.updateSettings(this.cfg).subscribe({
-      next: () => { this.saving = false; this.saved = true; },
+    this.api.updateSettings({ ...this.cfg, locale: this.locale }).subscribe({
+      next: () => { this.saving = false; this.saved = true; this.cfg.hibp_api_key = ''; },
       error: () => { this.saving = false; },
+    });
+  }
+
+  clearCache() {
+    this.api.clearCache().subscribe(r => {
+      this.cacheMsg = `Cleared ${r.cleared} cache entries`;
     });
   }
 }

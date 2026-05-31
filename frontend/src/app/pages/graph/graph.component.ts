@@ -1,5 +1,6 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import cytoscape, { Core, NodeSingular } from 'cytoscape';
@@ -22,7 +23,7 @@ interface NodeDetail {
 @Component({
   selector: 'cm-graph',
   standalone: true,
-  imports: [CommonModule, RouterLink, MatIconModule],
+  imports: [CommonModule, FormsModule, RouterLink, MatIconModule],
   template: `
     <div class="page-header">
       <h1>Relationship Graph</h1>
@@ -30,7 +31,14 @@ interface NodeDetail {
     </div>
 
     <div class="toolbar">
-      <a class="btn-secondary" routerLink="/investigate"><mat-icon>arrow_back</mat-icon> Back</a>
+      <a class="btn-secondary" routerLink="/history"><mat-icon>arrow_back</mat-icon> History</a>
+      <select *ngIf="scans.length" [(ngModel)]="scanId" (ngModelChange)="loadGraph()" class="scan-select">
+        <option *ngFor="let s of scans" [value]="s.id">{{ s.created_at | date:'short' }} — {{ s.profile.username || s.profile.email || 'scan' }}</option>
+      </select>
+      <select [(ngModel)]="riskFilter" (ngModelChange)="applyFilter()" class="scan-select">
+        <option value="">All risks</option>
+        <option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
+      </select>
       <a class="btn-primary" *ngIf="scanId" [routerLink]="['/reports', scanId]">Export Report</a>
     </div>
 
@@ -76,7 +84,8 @@ interface NodeDetail {
     </div>
   `,
   styles: [`
-    .toolbar { display: flex; gap: 1rem; margin-bottom: 1rem; }
+    .toolbar { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+    .scan-select { padding: 0.45rem 0.75rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); min-width: 200px; }
     .graph-layout { display: grid; grid-template-columns: 1fr 320px; gap: 1rem; align-items: start; }
     .graph-card { padding: 0; overflow: hidden; }
     .cy-container { height: calc(100vh - 280px); min-height: 500px; width: 100%; background: var(--cm-bg); }
@@ -115,16 +124,44 @@ export class GraphComponent implements OnInit, OnDestroy {
   @ViewChild('cyContainer', { static: true }) cyEl!: ElementRef;
 
   scanId = '';
+  scans: any[] = [];
+  riskFilter = '';
   selected: NodeDetail | null = null;
   private cy?: Core;
+  private rawGraph: any = null;
 
   constructor(private route: ActivatedRoute, private api: ApiService) {}
 
   ngOnInit() {
     this.scanId = this.route.snapshot.paramMap.get('scanId') ?? '';
-    if (this.scanId) {
-      this.api.graph(this.scanId).subscribe(data => this.renderGraph(data));
+    this.api.listScans(30).subscribe(s => {
+      this.scans = s;
+      if (!this.scanId && s.length) this.scanId = s[0].id;
+      if (this.scanId) this.loadGraph();
+    });
+  }
+
+  loadGraph() {
+    if (!this.scanId) return;
+    this.api.graph(this.scanId).subscribe(data => {
+      this.rawGraph = data;
+      this.applyFilter();
+    });
+  }
+
+  applyFilter() {
+    if (!this.rawGraph) return;
+    let data = this.rawGraph;
+    if (this.riskFilter) {
+      const allowed = new Set(
+        data.nodes.filter((n: any) => n.type === 'Finding' && n.data?.risk === this.riskFilter).map((n: any) => n.id)
+      );
+      const nodes = data.nodes.filter((n: any) => n.type !== 'Finding' || allowed.has(n.id));
+      const ids = new Set(nodes.map((n: any) => n.id));
+      const edges = data.edges.filter((e: any) => ids.has(e.source) && ids.has(e.target));
+      data = { nodes, edges };
     }
+    this.renderGraph(data);
   }
 
   ngOnDestroy() {
@@ -230,7 +267,7 @@ export class GraphComponent implements OnInit, OnDestroy {
           },
         },
       ],
-      layout: { name: 'cose', animate: true, padding: 60, nodeRepulsion: 8000 },
+      layout: { name: 'cose', animate: true, padding: 60, nodeRepulsion: 12000, idealEdgeLength: 80 },
       wheelSensitivity: 0.3,
       minZoom: 0.3,
       maxZoom: 3,

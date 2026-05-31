@@ -133,6 +133,8 @@ class SettingsUpdate(BaseModel):
     schedule_enabled: bool | None = None
     schedule_interval_hours: int | None = None
     cache_ttl_seconds: int | None = None
+    enabled_modules: list[str] | None = None
+    locale: str | None = None
 
 
 class ScanCompareResult(BaseModel):

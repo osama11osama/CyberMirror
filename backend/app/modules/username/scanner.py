@@ -6,15 +6,19 @@ from urllib.parse import quote
 
 import httpx
 
+from app.engine.scan_context import check_cancelled, raise_if_cancelled
 from app.models.schemas import Finding, FindingCategory, IdentityProfile
 from app.modules.base import NativeModule
-from app.services.http_client import DEFAULT_HEADERS, get_with_retry
 from app.modules.username.wmn_loader import load_all_sites
+from app.services.cache import get_cached_raw, set_cached_raw
+from app.services.http_client import DEFAULT_HEADERS, get_with_retry
+from app.services.rate_limiter import throttle
 
 logger = logging.getLogger(__name__)
 
-CONCURRENCY = 15
+CONCURRENCY = 8
 TIMEOUT = 18
+BATCH_SIZE = 40
 
 
 class UsernameScanModule(NativeModule):
@@ -48,26 +52,31 @@ class UsernameScanModule(NativeModule):
             follow_redirects=True,
             headers=DEFAULT_HEADERS,
         ) as client:
-            tasks = [
-                self._check_site(client, sem, site, username, scan_id)
-                for site in sites
-            ]
-            results = await asyncio.gather(*tasks)
-
-        for r in results:
-            if r is None:
-                checked += 1
-            elif isinstance(r, Finding):
-                findings.append(r)
-                checked += 1
-            elif r == "error":
-                errors += 1
-                checked += 1
+            for i in range(0, len(sites), BATCH_SIZE):
+                raise_if_cancelled(scan_id)
+                batch_sites = sites[i : i + BATCH_SIZE]
+                results = await asyncio.gather(*[
+                    self._check_site(client, sem, site, username, scan_id)
+                    for site in batch_sites
+                ])
+                for r in results:
+                    if r is None:
+                        checked += 1
+                    elif isinstance(r, Finding):
+                        findings.append(r)
+                        checked += 1
+                    elif r == "error":
+                        errors += 1
+                        checked += 1
+                await throttle(0.25)
 
         logger.info(
             "Username scan '%s': %d platforms checked, %d found, %d errors",
             username, checked, len(findings), errors,
         )
+
+        if check_cancelled(scan_id):
+            return findings
 
         if not findings:
             findings.append(Finding(
@@ -76,7 +85,7 @@ class UsernameScanModule(NativeModule):
                 title=f"No direct username hits for '{username}'",
                 description=(
                     f"Checked {checked} platforms. Some sites (Facebook, Instagram) "
-                    "block automated checks — see Web Search results for those."
+                    "block automated checks — see Web Search and Social Browser results."
                 ),
                 confidence=0.3,
                 raw={"platforms_checked": checked, "errors": errors},
@@ -88,7 +97,17 @@ class UsernameScanModule(NativeModule):
         self, client: httpx.AsyncClient, sem: asyncio.Semaphore,
         site: dict, username: str, scan_id: str,
     ) -> Finding | None | str:
+        if check_cancelled(scan_id):
+            return None
+        cache_key = f"username:{username}:{site['name']}"
+        cached = get_cached_raw(cache_key)
+        if cached == "miss":
+            return None
+        if isinstance(cached, dict) and cached.get("platform"):
+            return Finding(**cached)
+
         async with sem:
+            await throttle(0.08)
             url = site["url"].replace("{username}", quote(username, safe=""))
             try:
                 resp = await get_with_retry(client, url)
@@ -96,8 +115,9 @@ class UsernameScanModule(NativeModule):
                     return "error"
                 text = resp.text[:80000]
                 if not self._profile_exists(resp.status_code, text, site):
+                    set_cached_raw(cache_key, "miss")
                     return None
-                return Finding(
+                finding = Finding(
                     scan_id=scan_id,
                     source=self.id,
                     provider="UsernameScanModule",
@@ -110,6 +130,8 @@ class UsernameScanModule(NativeModule):
                     confidence=0.92,
                     raw={"category": site.get("category"), "status": resp.status_code},
                 )
+                set_cached_raw(cache_key, finding.model_dump())
+                return finding
             except Exception as exc:
                 logger.debug("Check failed %s: %s", site.get("name"), exc)
                 return "error"
