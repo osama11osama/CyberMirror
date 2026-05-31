@@ -133,13 +133,11 @@ export class ReportsComponent implements OnInit {
 
 
   export(format: string) {
-
     this.api.export(this.scanId, format).subscribe((res: ExportResponse) => {
-
       this.message = `Exported ${format.toUpperCase()} → ${res.path}`;
-
+      const url = this.api.exportDownloadUrl(this.scanId, format === 'pdf' ? 'pdf' : format);
+      window.open(url, '_blank');
     });
-
   }
 
 }

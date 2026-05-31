@@ -91,7 +91,7 @@ import { ApiService } from '../../services/api.service';
         <div class="table-wrap" *ngIf="filteredFindings.length">
           <table class="data-table">
             <thead>
-              <tr><th>Where</th><th>What</th><th>Source</th><th>When</th><th>Risk</th></tr>
+              <tr><th>Where</th><th>What</th><th>Source</th><th>Risk</th><th>Recommendation</th></tr>
             </thead>
             <tbody>
               <tr *ngFor="let f of filteredFindings">
@@ -102,10 +102,11 @@ import { ApiService } from '../../services/api.service';
                 <td>
                   <strong>{{ f.title }}</strong>
                   <p class="snippet" *ngIf="f.snippet">{{ f.snippet | slice:0:120 }}</p>
+                  <p class="snippet reason" *ngIf="f.risk_reason">{{ f.risk_reason }}</p>
                 </td>
                 <td>{{ f.source }}</td>
-                <td class="muted">{{ f.timestamp | date:'short' }}</td>
                 <td><span class="risk-badge" [class]="'risk-' + f.risk_level">{{ f.risk_level }}</span></td>
+                <td class="rec">{{ f.recommendation || '—' }}</td>
               </tr>
             </tbody>
           </table>
@@ -129,6 +130,8 @@ import { ApiService } from '../../services/api.service';
     .filters input, .filters select { flex: 1; min-width: 120px; padding: 0.5rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); }
     .table-wrap { overflow: auto; max-height: 520px; }
     .snippet { font-size: 0.85rem; color: var(--cm-muted); margin: 4px 0 0; }
+    .snippet.reason { font-style: italic; }
+    .rec { font-size: 0.85rem; max-width: 220px; }
     .muted { color: var(--cm-muted); }
     .loading, .error { padding: 2rem; text-align: center; color: var(--cm-muted); }
     @media (max-width: 900px) { .meta-grid { grid-template-columns: 1fr 1fr; } }

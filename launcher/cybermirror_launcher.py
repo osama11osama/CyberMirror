@@ -312,8 +312,6 @@ def check_dependencies(root: Path) -> list[str]:
         issues.append("Backend folder missing")
     if not (root / "frontend" / "package.json").exists():
         issues.append("Frontend folder missing")
-    if not (root / "frontend" / "node_modules").exists():
-        issues.append("Run: cd frontend && npm install")
     try:
         find_python()
     except RuntimeError as e:
@@ -323,6 +321,52 @@ def check_dependencies(root: Path) -> list[str]:
     except RuntimeError as e:
         issues.append(str(e))
     return issues
+
+
+def auto_setup(root: Path, python: str, npm: str) -> None:
+    """Install Python/npm deps and Playwright on first run."""
+    backend = root / "backend"
+    frontend = root / "frontend"
+    marker = root / "data" / ".setup_complete"
+
+    if not marker.exists():
+        log("First run — installing dependencies (one-time)…")
+
+        req = backend / "requirements.txt"
+        if req.exists():
+            log("  pip install -r requirements.txt …")
+            subprocess.run(
+                [python, "-m", "pip", "install", "-r", str(req)],
+                cwd=str(backend),
+                creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+            log("  playwright install chromium …")
+            subprocess.run(
+                [python, "-m", "playwright", "install", "chromium"],
+                cwd=str(backend),
+                creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+
+        if (frontend / "package.json").exists() and not (frontend / "node_modules").exists():
+            log("  npm install …")
+            subprocess.run(
+                [npm, "install"],
+                cwd=str(frontend),
+                shell=True,
+                creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+            )
+
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("ok", encoding="utf-8")
+        log("Setup complete ✓")
+    elif not (frontend / "node_modules").exists():
+        log("node_modules missing — running npm install …")
+        subprocess.run(
+            [npm, "install"],
+            cwd=str(frontend),
+            shell=True,
+            creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
 
 
 def tail_log_errors(name: str, lines: int = 20) -> None:
@@ -366,8 +410,10 @@ def start_tray(on_stop, on_open) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="CyberMirror Launcher")
-    parser.add_argument("--prod", action="store_true", help="Build + serve static (faster after first build)")
+    parser.add_argument("--prod", action="store_true", default=True, help="Production mode (default)")
+    parser.add_argument("--dev", action="store_true", help="Dev mode — ng serve (slow first compile)")
     args = parser.parse_args()
+    use_prod = not args.dev
 
     root = project_root()
     log("CyberMirror v2 launcher")
@@ -380,10 +426,11 @@ def main() -> int:
         input("Press Enter to exit…")
         return 1
 
-    stop_all()
-
     python = find_python()
     npm = find_npm()
+    auto_setup(root, python, npm)
+
+    stop_all()
     backend_dir = root / "backend"
     frontend_dir = root / "frontend"
 
@@ -396,7 +443,7 @@ def main() -> int:
         return 1
 
     # --- Frontend ---
-    if args.prod:
+    if use_prod:
         dist = resolve_frontend_dist(frontend_dir)
         if dist is None:
             log("No production build found — building Angular (one-time, ~2-5 min)…")

@@ -78,3 +78,31 @@ def load_all_sites(limit: int | None = None) -> list[dict]:
         logger.info("WMN data not found at %s — using built-in sites only", wmn_path)
 
     return list(by_name.values())
+
+
+def wmn_status() -> dict:
+    """Report WhatsMyName database availability for health/settings UI."""
+    path = settings.wmn_data_path
+    if not path.exists():
+        return {
+            "loaded": False,
+            "path": str(path),
+            "site_count": 0,
+            "message": "WMN file not found — using built-in sites only",
+        }
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        count = len(data.get("sites", []))
+        return {
+            "loaded": True,
+            "path": str(path),
+            "site_count": count,
+            "message": f"{count} platforms in WMN database",
+        }
+    except Exception as exc:
+        return {
+            "loaded": False,
+            "path": str(path),
+            "site_count": 0,
+            "message": str(exc),
+        }

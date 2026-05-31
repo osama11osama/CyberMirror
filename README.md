@@ -1,4 +1,4 @@
-# CyberMirror v1.0.0
+# CyberMirror v2.0.0
 
 **See Yourself as the Internet Sees You**
 
@@ -8,7 +8,25 @@ CyberMirror is a **local OSINT self-audit platform**. Enter a name, username, em
 
 ---
 
-## Version 1.0.0 — What's Included
+## Version 2.0.0 — What's New
+
+| Feature | Description |
+|---------|-------------|
+| **Parallel scanning** | All modules run concurrently — faster full scans |
+| **Live results** | Findings appear in Evidence Center while scan runs |
+| **Cancel scan** | Stop a long scan from the Investigation page |
+| **Recommendations** | Each finding shows risk reason + actionable advice |
+| **History pagination & delete** | Browse pages of past scans, remove old entries |
+| **Export download** | One-click browser download for HTML/JSON/CSV |
+| **Consent modal** | Legal acknowledgment before first investigation |
+| **WMN health check** | Settings warns if WhatsMyName database is missing |
+| **Email probes** | Spotify, Twitter/X, Adobe registration signals |
+| **Auto-setup launcher** | First run installs Python/npm deps automatically |
+| **Prod mode default** | `CyberMirror.bat` serves built UI (fast startup) |
+
+---
+
+## Version 1.0.0 — Core Platform
 
 | Feature | Description |
 |---------|-------------|
@@ -38,11 +56,17 @@ cd ..\frontend
 npm install
 ```
 
-### Run (recommended — production mode)
+### Run (recommended — production mode, default)
 
 ```powershell
 # Double-click or run:
-CyberMirror-Prod.bat
+CyberMirror.bat
+```
+
+Dev mode (slow first compile):
+
+```powershell
+python launcher\cybermirror_launcher.py --dev
 ```
 
 Or build the exe once:
@@ -50,7 +74,7 @@ Or build the exe once:
 ```powershell
 cd launcher
 .\build-exe.bat
-# Then double-click CyberMirror.exe --prod
+# Then double-click CyberMirror.exe
 ```
 
 ### What the launcher does
@@ -155,9 +179,15 @@ Edit in **Settings** UI or `data/runtime_settings.json`:
 | `/api/scans` | POST | Start scan (async) |
 | `/api/scans/{id}/status` | GET | Scan progress |
 | `/api/scans/{id}` | GET | Full scan + findings |
+| `/api/scans` | GET | List scans (limit, offset) |
+| `/api/scans/count` | GET | Total scan count |
+| `/api/scans/{id}/cancel` | POST | Cancel running scan |
+| `/api/scans/{id}/findings/live` | GET | Live findings during scan |
+| `/api/scans/{id}` | DELETE | Delete scan |
 | `/api/scans/compare/{a}/{b}` | GET | Compare two scans |
 | `/api/scans/{id}/graph` | GET | Graph data |
 | `/api/scans/{id}/export` | POST | Export report |
+| `/api/scans/{id}/export/{fmt}/download` | GET | Download export file |
 
 ---
 
@@ -165,6 +195,7 @@ Edit in **Settings** UI or `data/runtime_settings.json`:
 
 | Tag | Description |
 |-----|-------------|
+| **v2.0.0** | Parallel scans, live results, cancel, recommendations, history delete, auto-setup |
 | **v1.0.0** | First stable release — native engine, history, graph, launcher |
 
 ---

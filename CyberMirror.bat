@@ -9,5 +9,5 @@ if %errorlevel% neq 0 (
   exit /b 1
 )
 
-python "%~dp0launcher\cybermirror_launcher.py"
+python "%~dp0launcher\cybermirror_launcher.py" --prod
 if errorlevel 1 pause

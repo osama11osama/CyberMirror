@@ -15,6 +15,15 @@ import { ApiService } from '../../services/api.service';
     </div>
 
     <div class="grid">
+      <div class="card wmn-banner" *ngIf="wmnWarning">
+        <mat-icon>warning</mat-icon>
+        <div>
+          <strong>WhatsMyName database not loaded</strong>
+          <p>{{ wmnWarning }}</p>
+          <p class="muted">Set the correct path below to scan 600+ platforms.</p>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header"><mat-icon>tune</mat-icon><h3>Scan Configuration</h3></div>
         <div class="form-field">
@@ -74,6 +83,8 @@ import { ApiService } from '../../services/api.service';
   `,
   styles: [`
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .wmn-banner { grid-column: 1 / -1; display: flex; gap: 1rem; align-items: flex-start; background: rgba(210,153,34,0.12); border: 1px solid #d29922; }
+    .wmn-banner mat-icon { color: #d29922; }
     .form-field { margin-bottom: 1rem; }
     .form-field label { display: block; margin-bottom: 0.35rem; color: var(--cm-muted); font-size: 0.85rem; }
     .form-field input { width: 100%; padding: 0.5rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); }
@@ -103,10 +114,17 @@ export class SettingsComponent implements OnInit {
   };
   saving = false;
   saved = false;
+  wmnWarning = '';
 
   constructor(private api: ApiService) {}
 
   ngOnInit() {
+    this.api.health().subscribe({
+      next: h => {
+        const wmn = h.wmn;
+        if (wmn && !wmn.loaded) this.wmnWarning = wmn.message || 'WMN file missing';
+      },
+    });
     this.api.settings().subscribe({ next: s => this.cfg = { ...this.cfg, ...s } });
     this.api.modules().subscribe({
       next: m => { if (m?.length) this.modules = m; },

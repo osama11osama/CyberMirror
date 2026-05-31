@@ -1,251 +1,666 @@
-"""FastAPI route handlers."""
-
-import json
-from contextlib import asynccontextmanager
-from datetime import datetime
-
-from fastapi import APIRouter, BackgroundTasks, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.config import settings
-from app.engine.job_store import get_job
-from app.engine.scan_engine import ScanEngine
-from app.models.schemas import (
-    DashboardStats,
-    ExportRequest,
-    IdentityProfile,
-    ScanCompareResult,
-    ScanDetail,
-    ScanRequest,
-    ScanStartResponse,
-    ScanSummary,
-    SettingsUpdate,
-)
-from app.modules.registry import DEFAULT_MODULES, list_modules
-from app.services.graph_builder import build_graph
-from app.services.logging_setup import setup_logging
-from app.services.report_exporter import export_csv, export_html, export_json
-from app.services.runtime_settings import apply_runtime, load_runtime, save_runtime
-from app.services.scheduler import start_scheduler
-from app.storage.database import compare_scans, get_scan, init_db, list_scans, row_to_finding
-
-router = APIRouter(prefix="/api")
-engine = ScanEngine()
-
-
-@asynccontextmanager
-async def lifespan(app):
-    setup_logging()
-    apply_runtime()
-    start_scheduler()
-    yield
-
-
-@router.get("/health")
-def health():
-    rt = load_runtime()
-    return {
-        "status": "ok",
-        "app": settings.app_name,
-        "version": settings.app_version,
-        "engine": "CyberMirror Native",
-        "slogan": "See Yourself as the Internet Sees You",
-        "modules": len(DEFAULT_MODULES),
-        "username_scan_limit": rt.get("username_scan_limit"),
-    }
-
-
-@router.get("/modules")
-def modules():
-    return list_modules()
-
-
-@router.get("/providers")
-def providers_legacy():
-    return list_modules()
-
-
-@router.get("/settings")
-def get_settings():
-    rt = load_runtime()
-    return {
-        "engine": "native",
-        "default_modules": DEFAULT_MODULES,
-        "serpapi_key_set": bool(settings.serpapi_key),
-        "hibp_api_key_set": bool(rt.get("hibp_api_key") or settings.hibp_api_key),
-        **rt,
-    }
-
-
-@router.put("/settings")
-def update_settings(body: SettingsUpdate):
-    data = {}
-    if body.serpapi_key is not None:
-        settings.serpapi_key = body.serpapi_key or None
-    for field in (
-        "hibp_api_key", "username_scan_limit", "web_search_max_queries",
-        "web_search_results_per_query", "wmn_data_path", "playwright_enabled",
-        "schedule_enabled", "schedule_interval_hours", "cache_ttl_seconds",
-    ):
-        val = getattr(body, field, None)
-        if val is not None:
-            data[field] = val
-    if data:
-        save_runtime(data)
-    return get_settings()
-
-
-@router.post("/scans")
-async def start_scan(body: ScanRequest, background_tasks: BackgroundTasks):
-    modules = body.providers or DEFAULT_MODULES
-    if body.async_mode:
-        started = engine.start_scan(body.profile, modules)
-        background_tasks.add_task(
-            engine.run_scan_background, started.id, body.profile, modules
-        )
-        return started
-    return await engine.run_scan(body.profile, modules)
-
-
-@router.get("/scans", response_model=list[ScanSummary])
-def scans_list():
-    return list_scans()
-
-
-@router.get("/scans/{scan_id}", response_model=ScanDetail)
-def scan_detail(scan_id: str):
-    data = get_scan(scan_id)
-    if not data:
-        raise HTTPException(404, "Scan not found")
-    row = data["scan"]
-    findings = [row_to_finding(f) for f in data["findings"]]
-    return ScanDetail(
-        id=row["id"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        profile=IdentityProfile.model_validate_json(row["profile_json"]),
-        status=row["status"],
-        providers=json.loads(row["providers"]),
-        finding_count=row["finding_count"],
-        risk_score=row["risk_score"],
-        findings=findings,
-    )
-
-
-@router.get("/scans/{scan_id}/status")
-def scan_status(scan_id: str):
-    job = get_job(scan_id)
-    if job:
-        return job
-    data = get_scan(scan_id)
-    if not data:
-        raise HTTPException(404, "Scan not found")
-    return {
-        "scan_id": scan_id,
-        "status": data["scan"]["status"],
-        "progress": 100 if data["scan"]["status"] == "completed" else 0,
-        "message": data["scan"]["status"],
-        "findings_so_far": data["scan"]["finding_count"],
-    }
-
-
-@router.get("/scans/compare/{scan_a}/{scan_b}", response_model=ScanCompareResult)
-def scan_compare(scan_a: str, scan_b: str):
-    result = compare_scans(scan_a, scan_b)
-    if result is None:
-        raise HTTPException(404, "One or both scans not found")
-    return result
-
-
-@router.get("/scans/{scan_id}/graph")
-def scan_graph(scan_id: str):
-    data = get_scan(scan_id)
-    if not data:
-        raise HTTPException(404, "Scan not found")
-    profile = IdentityProfile.model_validate_json(data["scan"]["profile_json"])
-    findings = [row_to_finding(f) for f in data["findings"]]
-    return build_graph(profile, findings)
-
-
-@router.get("/scans/{scan_id}/dashboard", response_model=DashboardStats)
-def scan_dashboard(scan_id: str):
-    data = get_scan(scan_id)
-    if not data:
-        raise HTTPException(404, "Scan not found")
-    findings = [row_to_finding(f) for f in data["findings"]]
-    by_source: dict[str, int] = {}
-    by_category: dict[str, int] = {}
-    by_risk: dict[str, int] = {}
-    high = 0
-    for f in findings:
-        by_source[f.source] = by_source.get(f.source, 0) + 1
-        by_category[f.category.value] = by_category.get(f.category.value, 0) + 1
-        by_risk[f.risk_level.value] = by_risk.get(f.risk_level.value, 0) + 1
-        if f.risk_level.value in ("Critical", "High"):
-            high += 1
-    row = data["scan"]
-    return DashboardStats(
-        total_findings=len(findings),
-        risk_score=row["risk_score"],
-        by_source=by_source,
-        by_category=by_category,
-        by_risk=by_risk,
-        high_risk_count=high,
-        recent_scans=list_scans(5),
-    )
-
-
-@router.post("/scans/{scan_id}/export")
-def export_scan(scan_id: str, body: ExportRequest):
-    data = get_scan(scan_id)
-    if not data:
-        raise HTTPException(404, "Scan not found")
-    row = data["scan"]
-    findings = [row_to_finding(f) for f in data["findings"]]
-    summary = ScanSummary(
-        id=row["id"],
-        created_at=datetime.fromisoformat(row["created_at"]),
-        profile=IdentityProfile.model_validate_json(row["profile_json"]),
-        status=row["status"],
-        providers=json.loads(row["providers"]),
-        finding_count=row["finding_count"],
-        risk_score=row["risk_score"],
-    )
-    settings.exports_dir.mkdir(parents=True, exist_ok=True)
-    ext = body.format.lower()
-    path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.{ext}"
-
-    if ext == "json":
-        export_json(summary, findings, path)
-    elif ext == "csv":
-        export_csv(findings, path)
-    elif ext == "html":
-        export_html(summary, findings, path)
-    elif ext == "pdf":
-        html_path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.html"
-        export_html(summary, findings, html_path)
-        path = html_path
-    else:
-        raise HTTPException(400, f"Unsupported format: {ext}")
-
-    return {"path": str(path), "format": ext}
-
-
-def create_app():
-    from fastapi import FastAPI
-
-    init_db()
-    app = FastAPI(
-        title=settings.app_name,
-        description="CyberMirror — Native OSINT Self-Audit Engine",
-        version=settings.app_version,
-        lifespan=lifespan,
-    )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    app.include_router(router)
-    return app
+"""FastAPI route handlers."""
+
+
+
+import json
+
+from contextlib import asynccontextmanager
+
+from datetime import datetime
+
+
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+
+from app.config import settings
+from app.engine.job_store import get_job, get_live_findings
+
+from app.engine.scan_engine import ScanEngine
+
+from app.models.schemas import (
+
+    DashboardStats,
+
+    ExportRequest,
+
+    IdentityProfile,
+
+    ScanCompareResult,
+
+    ScanDetail,
+
+    ScanRequest,
+
+    ScanStartResponse,
+
+    ScanSummary,
+
+    SettingsUpdate,
+
+)
+
+from app.modules.registry import DEFAULT_MODULES, list_modules
+
+from app.services.graph_builder import build_graph
+
+from app.services.logging_setup import setup_logging
+
+from app.services.report_exporter import export_csv, export_html, export_json
+
+from app.services.runtime_settings import apply_runtime, load_runtime, save_runtime
+
+from app.services.scheduler import start_scheduler
+
+from app.storage.database import (
+    compare_scans,
+    count_scans,
+    delete_scan,
+    get_scan,
+    init_db,
+    list_scans,
+    row_to_finding,
+)
+from app.modules.username.wmn_loader import wmn_status
+
+
+
+router = APIRouter(prefix="/api")
+
+engine = ScanEngine()
+
+
+
+
+
+@asynccontextmanager
+
+async def lifespan(app):
+
+    setup_logging()
+
+    apply_runtime()
+
+    start_scheduler()
+
+    yield
+
+
+
+
+
+@router.get("/health")
+
+def health():
+
+    rt = load_runtime()
+
+    return {
+
+        "status": "ok",
+
+        "app": settings.app_name,
+
+        "version": settings.app_version,
+
+        "engine": "CyberMirror Native",
+
+        "slogan": "See Yourself as the Internet Sees You",
+
+        "modules": len(DEFAULT_MODULES),
+
+        "username_scan_limit": rt.get("username_scan_limit"),
+
+        "wmn": wmn_status(),
+
+    }
+
+
+
+
+
+@router.get("/modules")
+
+def modules():
+
+    return list_modules()
+
+
+
+
+
+@router.get("/providers")
+
+def providers_legacy():
+
+    return list_modules()
+
+
+
+
+
+@router.get("/settings")
+
+def get_settings():
+
+    rt = load_runtime()
+
+    return {
+
+        "engine": "native",
+
+        "default_modules": DEFAULT_MODULES,
+
+        "serpapi_key_set": bool(settings.serpapi_key),
+
+        "hibp_api_key_set": bool(rt.get("hibp_api_key") or settings.hibp_api_key),
+
+        **rt,
+
+    }
+
+
+
+
+
+@router.put("/settings")
+
+def update_settings(body: SettingsUpdate):
+
+    data = {}
+
+    if body.serpapi_key is not None:
+
+        settings.serpapi_key = body.serpapi_key or None
+
+    for field in (
+
+        "hibp_api_key", "username_scan_limit", "web_search_max_queries",
+
+        "web_search_results_per_query", "wmn_data_path", "playwright_enabled",
+
+        "schedule_enabled", "schedule_interval_hours", "cache_ttl_seconds",
+
+    ):
+
+        val = getattr(body, field, None)
+
+        if val is not None:
+
+            data[field] = val
+
+    if data:
+
+        save_runtime(data)
+
+    return get_settings()
+
+
+
+
+
+@router.post("/scans")
+
+async def start_scan(body: ScanRequest, background_tasks: BackgroundTasks):
+
+    modules = body.providers or DEFAULT_MODULES
+
+    if body.async_mode:
+
+        started = engine.start_scan(body.profile, modules)
+
+        background_tasks.add_task(
+
+            engine.run_scan_background, started.id, body.profile, modules
+
+        )
+
+        return started
+
+    return await engine.run_scan(body.profile, modules)
+
+
+
+
+
+@router.get("/scans", response_model=list[ScanSummary])
+
+def scans_list(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+
+    return list_scans(limit=limit, offset=offset)
+
+
+
+
+
+@router.get("/scans/count")
+
+def scans_count():
+
+    return {"total": count_scans()}
+
+
+
+
+
+@router.delete("/scans/{scan_id}")
+
+def scan_delete(scan_id: str):
+
+    if not delete_scan(scan_id):
+
+        raise HTTPException(404, "Scan not found")
+
+    return {"deleted": True, "scan_id": scan_id}
+
+
+
+
+
+@router.post("/scans/{scan_id}/cancel")
+
+def scan_cancel(scan_id: str):
+
+    if not engine.cancel_scan(scan_id):
+
+        raise HTTPException(404, "Scan not running or not found")
+
+    return {"cancelled": True, "scan_id": scan_id}
+
+
+
+
+
+@router.get("/scans/{scan_id}/findings/live")
+
+def scan_live_findings(scan_id: str):
+
+    live = get_live_findings(scan_id)
+
+    if live:
+
+        return {"findings": live, "count": len(live)}
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    return {"findings": [row_to_finding(f).model_dump() for f in data["findings"]], "count": len(data["findings"])}
+
+
+
+
+
+@router.get("/scans/{scan_id}", response_model=ScanDetail)
+
+def scan_detail(scan_id: str):
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    row = data["scan"]
+
+    findings = [row_to_finding(f) for f in data["findings"]]
+
+    return ScanDetail(
+
+        id=row["id"],
+
+        created_at=datetime.fromisoformat(row["created_at"]),
+
+        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+
+        status=row["status"],
+
+        providers=json.loads(row["providers"]),
+
+        finding_count=row["finding_count"],
+
+        risk_score=row["risk_score"],
+
+        findings=findings,
+
+    )
+
+
+
+
+
+@router.get("/scans/{scan_id}/status")
+
+def scan_status(scan_id: str):
+
+    job = get_job(scan_id)
+
+    if job:
+
+        return job
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    return {
+
+        "scan_id": scan_id,
+
+        "status": data["scan"]["status"],
+
+        "progress": 100 if data["scan"]["status"] == "completed" else 0,
+
+        "message": data["scan"]["status"],
+
+        "findings_so_far": data["scan"]["finding_count"],
+
+    }
+
+
+
+
+
+@router.get("/scans/compare/{scan_a}/{scan_b}", response_model=ScanCompareResult)
+
+def scan_compare(scan_a: str, scan_b: str):
+
+    result = compare_scans(scan_a, scan_b)
+
+    if result is None:
+
+        raise HTTPException(404, "One or both scans not found")
+
+    return result
+
+
+
+
+
+@router.get("/scans/{scan_id}/graph")
+
+def scan_graph(scan_id: str):
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    profile = IdentityProfile.model_validate_json(data["scan"]["profile_json"])
+
+    findings = [row_to_finding(f) for f in data["findings"]]
+
+    return build_graph(profile, findings)
+
+
+
+
+
+@router.get("/scans/{scan_id}/dashboard", response_model=DashboardStats)
+
+def scan_dashboard(scan_id: str):
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    findings = [row_to_finding(f) for f in data["findings"]]
+
+    by_source: dict[str, int] = {}
+
+    by_category: dict[str, int] = {}
+
+    by_risk: dict[str, int] = {}
+
+    high = 0
+
+    for f in findings:
+
+        by_source[f.source] = by_source.get(f.source, 0) + 1
+
+        by_category[f.category.value] = by_category.get(f.category.value, 0) + 1
+
+        by_risk[f.risk_level.value] = by_risk.get(f.risk_level.value, 0) + 1
+
+        if f.risk_level.value in ("Critical", "High"):
+
+            high += 1
+
+    row = data["scan"]
+
+    return DashboardStats(
+
+        total_findings=len(findings),
+
+        risk_score=row["risk_score"],
+
+        by_source=by_source,
+
+        by_category=by_category,
+
+        by_risk=by_risk,
+
+        high_risk_count=high,
+
+        recent_scans=list_scans(5),
+
+    )
+
+
+
+
+
+@router.post("/scans/{scan_id}/export")
+
+def export_scan(scan_id: str, body: ExportRequest):
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    row = data["scan"]
+
+    findings = [row_to_finding(f) for f in data["findings"]]
+
+    summary = ScanSummary(
+
+        id=row["id"],
+
+        created_at=datetime.fromisoformat(row["created_at"]),
+
+        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+
+        status=row["status"],
+
+        providers=json.loads(row["providers"]),
+
+        finding_count=row["finding_count"],
+
+        risk_score=row["risk_score"],
+
+    )
+
+    settings.exports_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = body.format.lower()
+
+    path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.{ext}"
+
+
+
+    if ext == "json":
+
+        export_json(summary, findings, path)
+
+    elif ext == "csv":
+
+        export_csv(findings, path)
+
+    elif ext == "html":
+
+        export_html(summary, findings, path)
+
+    elif ext == "pdf":
+
+        html_path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.html"
+
+        export_html(summary, findings, html_path)
+
+        path = html_path
+
+    else:
+
+        raise HTTPException(400, f"Unsupported format: {ext}")
+
+
+
+    return {"path": str(path), "format": ext}
+
+
+
+
+
+@router.get("/scans/{scan_id}/export/{format}/download")
+
+def download_export(scan_id: str, format: str):
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    row = data["scan"]
+
+    findings = [row_to_finding(f) for f in data["findings"]]
+
+    summary = ScanSummary(
+
+        id=row["id"],
+
+        created_at=datetime.fromisoformat(row["created_at"]),
+
+        profile=IdentityProfile.model_validate_json(row["profile_json"]),
+
+        status=row["status"],
+
+        providers=json.loads(row["providers"]),
+
+        finding_count=row["finding_count"],
+
+        risk_score=row["risk_score"],
+
+    )
+
+    settings.exports_dir.mkdir(parents=True, exist_ok=True)
+
+    ext = format.lower()
+
+    path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.{ext}"
+
+
+
+    if ext == "json":
+
+        export_json(summary, findings, path)
+
+    elif ext == "csv":
+
+        export_csv(findings, path)
+
+    elif ext == "html":
+
+        export_html(summary, findings, path)
+
+    elif ext == "pdf":
+
+        export_html(summary, findings, path)
+
+        path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.html"
+
+    else:
+
+        raise HTTPException(400, f"Unsupported format: {ext}")
+
+
+
+    if not path.exists():
+
+        raise HTTPException(500, "Export failed")
+
+
+
+    media = {
+
+        "json": "application/json",
+
+        "csv": "text/csv",
+
+        "html": "text/html",
+
+        "pdf": "text/html",
+
+    }
+
+    return FileResponse(
+
+        path,
+
+        media_type=media.get(ext, "application/octet-stream"),
+
+        filename=path.name,
+
+    )
+
+
+
+
+
+def create_app():
+
+    from fastapi import FastAPI
+
+
+
+    init_db()
+
+    app = FastAPI(
+
+        title=settings.app_name,
+
+        description="CyberMirror — Native OSINT Self-Audit Engine",
+
+        version=settings.app_version,
+
+        lifespan=lifespan,
+
+    )
+
+    app.add_middleware(
+
+        CORSMiddleware,
+
+        allow_origins=["*"],
+
+        allow_credentials=True,
+
+        allow_methods=["*"],
+
+        allow_headers=["*"],
+
+    )
+
+    app.include_router(router)
+
+    return app
+

@@ -130,12 +130,36 @@ def save_findings(findings: list[Finding]) -> None:
         conn.commit()
 
 
-def list_scans(limit: int = 50) -> list[ScanSummary]:
+def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM scans ORDER BY created_at DESC LIMIT ?", (limit,)
+            "SELECT * FROM scans ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
     return [_row_to_summary(r) for r in rows]
+
+
+def count_scans() -> int:
+    with _connect() as conn:
+        row = conn.execute("SELECT COUNT(*) as c FROM scans").fetchone()
+    return row["c"] if row else 0
+
+
+def delete_scan(scan_id: str) -> bool:
+    with _connect() as conn:
+        row = conn.execute("SELECT id FROM scans WHERE id=?", (scan_id,)).fetchone()
+        if not row:
+            return False
+        conn.execute("DELETE FROM findings WHERE scan_id=?", (scan_id,))
+        conn.execute("DELETE FROM scans WHERE id=?", (scan_id,))
+        conn.commit()
+    return True
+
+
+def delete_findings_for_scan(scan_id: str) -> None:
+    with _connect() as conn:
+        conn.execute("DELETE FROM findings WHERE scan_id=?", (scan_id,))
+        conn.commit()
 
 
 def get_scan(scan_id: str) -> dict | None:
