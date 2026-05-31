@@ -1,0 +1,20 @@
+# CyberMirror
+.env
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+data/*.sqlite3
+exports/*
+!.gitkeep
+frontend/.angular/
+desktop/out/
+*.log
+.cybermirror-pids.json
+data/cache/
+data/logs/
+launcher/build/
+launcher/*.spec
+CyberMirror.exe
+frontend/dist/

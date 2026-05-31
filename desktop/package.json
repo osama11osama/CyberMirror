@@ -1,0 +1,22 @@
+{
+  "name": "cybermirror-desktop",
+  "version": "0.1.0",
+  "description": "CyberMirror — See Yourself as the Internet Sees You",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder"
+  },
+  "build": {
+    "appId": "com.cybermirror.app",
+    "productName": "CyberMirror",
+    "directories": { "output": "out" },
+    "files": ["main.js", "preload.js", "../frontend/dist/**/*"],
+    "extraResources": [{ "from": "../backend", "to": "backend", "filter": ["**/*"] }]
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

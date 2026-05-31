@@ -1,0 +1,254 @@
+import { Component, OnInit, OnDestroy } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { MatIconModule } from '@angular/material/icon';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { Subscription, interval, switchMap } from 'rxjs';
+import { ApiService, IdentityProfile, ScanStatus } from '../../services/api.service';
+
+const DEFAULT_SELECTED = [
+  'web_search', 'username_scan', 'social_browser', 'email_scan',
+  'phone_scan', 'breach_scan', 'domain_scan', 'identity_correlator',
+];
+
+@Component({
+  selector: 'cm-investigate',
+  standalone: true,
+  imports: [CommonModule, FormsModule, RouterLink, MatIconModule, MatProgressBarModule],
+  template: `
+    <div class="page-header">
+      <h1>Investigation Workspace</h1>
+      <p class="subtitle">Full internet scan — 600+ sites, browser checks, breaches, phone</p>
+    </div>
+
+    <div class="backend-banner" *ngIf="!backendOk">
+      <mat-icon>cloud_off</mat-icon>
+      <div><strong>Backend not connected</strong><p>Run CyberMirror.exe or <code>python main.py</code></p></div>
+    </div>
+
+    <div class="workspace">
+      <div class="panel card">
+        <div class="card-header"><mat-icon>person_search</mat-icon><h3>Identity Profile</h3></div>
+        <p class="hint">Fill everything you know — more fields = more results.</p>
+        <div class="form-grid">
+          <div class="form-field"><label>Full Name</label><input [(ngModel)]="profile.full_name" placeholder="Jane Doe" /></div>
+          <div class="form-field"><label>Username</label><input [(ngModel)]="profile.username" placeholder="janedoe" /></div>
+          <div class="form-field"><label>Email</label><input [(ngModel)]="profile.email" type="email" /></div>
+          <div class="form-field"><label>Phone</label><input [(ngModel)]="profile.phone" placeholder="+1 555-0100" /></div>
+          <div class="form-field"><label>Location</label><input [(ngModel)]="profile.location" /></div>
+          <div class="form-field"><label>Website</label><input [(ngModel)]="profile.website" placeholder="https://..." /></div>
+          <div class="form-field full"><label>Company</label><input [(ngModel)]="profile.company" /></div>
+        </div>
+
+        <div class="card-header" style="margin-top:1.5rem"><mat-icon>memory</mat-icon><h3>Scan Modules</h3></div>
+        <div class="provider-grid">
+          <label class="provider-item" *ngFor="let m of nativeModules" [class.selected]="selected.includes(m.id)">
+            <input type="checkbox" [checked]="selected.includes(m.id)" (change)="toggleModule(m.id)" />
+            <div class="provider-info">
+              <strong>{{ m.name }}</strong>
+              <small>{{ m.description }}</small>
+            </div>
+          </label>
+        </div>
+
+        <div class="scan-progress" *ngIf="scanning">
+          <mat-progress-bar mode="determinate" [value]="progress"></mat-progress-bar>
+          <p class="msg">{{ progressMsg }}</p>
+          <p class="msg muted" *ngIf="findingsSoFar">Found so far: {{ findingsSoFar }}</p>
+        </div>
+
+        <button class="btn-primary full-width" (click)="runScan()" [disabled]="scanning || !canScan() || !backendOk">
+          <mat-icon>{{ scanning ? 'hourglass_top' : 'radar' }}</mat-icon>
+          {{ scanning ? 'Scanning… ' + progress + '%' : 'Run Full Scan' }}
+        </button>
+        <p class="error" *ngIf="error">{{ error }}</p>
+      </div>
+
+      <div class="panel card results">
+        <div class="card-header">
+          <mat-icon>fact_check</mat-icon><h3>Evidence Center</h3>
+          <span class="count-badge" *ngIf="filteredFindings.length">{{ filteredFindings.length }}</span>
+        </div>
+
+        <div class="filters" *ngIf="realFindings.length">
+          <input [(ngModel)]="filterText" placeholder="Filter results…" />
+          <select [(ngModel)]="filterSource">
+            <option value="">All sources</option>
+            <option *ngFor="let s of sources" [value]="s">{{ s }}</option>
+          </select>
+          <select [(ngModel)]="filterRisk">
+            <option value="">All risks</option>
+            <option>Critical</option><option>High</option><option>Medium</option><option>Low</option><option>Info</option>
+          </select>
+        </div>
+
+        <div class="scan-summary success" *ngIf="scanSummary && !scanning">
+          <mat-icon>info</mat-icon><p>{{ scanSummary }}</p>
+        </div>
+
+        <div class="empty-state" *ngIf="!findings.length && !scanning && !scanSummary">
+          <mat-icon>shield</mat-icon>
+          <h3>Ready to scan</h3>
+          <p>600+ platforms · Playwright browser · web search · breaches · phone · WHOIS</p>
+        </div>
+
+        <div class="table-wrap" *ngIf="filteredFindings.length">
+          <table class="data-table">
+            <thead>
+              <tr><th>Where</th><th>What</th><th>Source</th><th>When</th><th>Risk</th></tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let f of filteredFindings">
+                <td>
+                  <strong>{{ f.platform }}</strong>
+                  <br *ngIf="f.url"><a [href]="f.url" target="_blank" rel="noopener">{{ f.url | slice:0:55 }}</a>
+                </td>
+                <td>
+                  <strong>{{ f.title }}</strong>
+                  <p class="snippet" *ngIf="f.snippet">{{ f.snippet | slice:0:100 }}</p>
+                </td>
+                <td>{{ f.source }}</td>
+                <td class="muted">{{ f.timestamp | date:'short' }}</td>
+                <td><span class="risk-badge" [class]="'risk-' + f.risk_level">{{ f.risk_level }}</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="result-actions" *ngIf="lastScanId">
+          <a class="btn-primary" [routerLink]="['/scan', lastScanId]">View Saved Results</a>
+          <a class="btn-primary" [routerLink]="['/graph', lastScanId]">Graph</a>
+          <a class="btn-secondary" [routerLink]="['/reports', lastScanId]">Export</a>
+        </div>
+      </div>
+    </div>
+  `,
+  styles: [`
+    .workspace { display: grid; grid-template-columns: 420px 1fr; gap: 1.5rem; align-items: start; }
+    .panel { max-height: calc(100vh - 180px); overflow-y: auto; }
+    .full-width { width: 100%; margin-top: 1rem; justify-content: center; }
+    .count-badge { margin-left: auto; background: var(--cm-accent); color: #fff; padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; }
+    .filters { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .filters input, .filters select { flex: 1; min-width: 120px; padding: 0.5rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); }
+    .table-wrap { overflow: auto; max-height: 480px; }
+    .snippet { font-size: 0.85rem; color: var(--cm-muted); margin: 4px 0 0; }
+    .hint, .muted { color: var(--cm-muted); }
+    .error { color: var(--cm-critical); margin-top: 0.75rem; }
+    .result-actions { display: flex; gap: 1rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--cm-border); }
+    .backend-banner, .scan-summary { display: flex; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 1rem; font-size: 0.9rem; }
+    .backend-banner { background: rgba(248,81,73,0.12); border: 1px solid var(--cm-critical); }
+    .scan-summary.success { background: rgba(63,185,80,0.1); border: 1px solid var(--cm-low); }
+    @media (max-width: 1100px) { .workspace { grid-template-columns: 1fr; } }
+  `],
+})
+export class InvestigateComponent implements OnInit, OnDestroy {
+  profile: IdentityProfile = { full_name: '', username: '', email: '', phone: '', location: '', website: '', company: '' };
+  nativeModules: any[] = [];
+  selected = [...DEFAULT_SELECTED];
+  findings: any[] = [];
+  scanning = false;
+  progress = 0;
+  progressMsg = '';
+  findingsSoFar = 0;
+  error = '';
+  scanSummary = '';
+  lastScanId = '';
+  backendOk = true;
+  filterText = '';
+  filterSource = '';
+  filterRisk = '';
+  private sub?: Subscription;
+  private pollSub?: Subscription;
+
+  constructor(private api: ApiService) {}
+
+  ngOnInit() {
+    this.api.health().subscribe({ next: () => this.backendOk = true, error: () => this.backendOk = false });
+    this.api.modules().subscribe({ next: m => { if (m?.length) this.nativeModules = m; } });
+  }
+
+  ngOnDestroy() { this.sub?.unsubscribe(); this.pollSub?.unsubscribe(); }
+
+  get realFindings() {
+    return this.findings.filter(f => f.platform !== 'Summary' && f.platform !== 'System');
+  }
+
+  get sources() {
+    return [...new Set(this.realFindings.map(f => f.source))];
+  }
+
+  get filteredFindings() {
+    return this.realFindings.filter(f => {
+      if (this.filterSource && f.source !== this.filterSource) return false;
+      if (this.filterRisk && f.risk_level !== this.filterRisk) return false;
+      if (this.filterText) {
+        const t = this.filterText.toLowerCase();
+        const hay = `${f.platform} ${f.title} ${f.url} ${f.snippet}`.toLowerCase();
+        if (!hay.includes(t)) return false;
+      }
+      return true;
+    });
+  }
+
+  canScan() {
+    const p = this.profile;
+    return !!(p.username || p.email || p.full_name || p.phone || p.website) && this.selected.length > 0;
+  }
+
+  toggleModule(id: string) {
+    const i = this.selected.indexOf(id);
+    if (i >= 0) this.selected.splice(i, 1); else this.selected.push(id);
+  }
+
+  runScan() {
+    this.scanning = true;
+    this.error = '';
+    this.findings = [];
+    this.scanSummary = '';
+    this.progress = 0;
+    this.findingsSoFar = 0;
+    this.progressMsg = 'Starting scan…';
+
+    this.sub = this.api.startScan({ profile: this.profile, providers: this.selected }).subscribe({
+      next: (started) => {
+        this.lastScanId = started.id;
+        this.pollSub = interval(1500).pipe(
+          switchMap(() => this.api.scanStatus(started.id))
+        ).subscribe({
+          next: (st: ScanStatus) => {
+            this.progress = st.progress || 0;
+            this.progressMsg = st.message || st.status;
+            this.findingsSoFar = st.findings_so_far || 0;
+            if (st.status === 'completed' || st.status === 'failed') {
+              this.pollSub?.unsubscribe();
+              if (st.status === 'failed') {
+                this.error = st.message || 'Scan failed';
+                this.scanning = false;
+                return;
+              }
+              this.api.getScan(started.id).subscribe({
+                next: (res) => {
+                  this.findings = res.findings ?? [];
+                  this.scanning = false;
+                  this.progress = 100;
+                  const n = this.realFindings.length;
+                  this.scanSummary = n
+                    ? `Complete — ${n} finding(s) recorded with URLs and sources.`
+                    : 'Complete — no public results. Try more fields or check Settings.';
+                },
+                error: () => { this.scanning = false; },
+              });
+            }
+          },
+          error: () => { this.error = 'Lost connection during scan'; this.scanning = false; },
+        });
+      },
+      error: (e) => {
+        this.error = e.error?.detail || e.message || 'Scan failed';
+        this.scanning = false;
+        this.backendOk = false;
+      },
+    });
+  }
+}

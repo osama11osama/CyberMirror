@@ -1,0 +1,67 @@
+[
+  {"name": "GitHub", "category": "coding", "url": "https://github.com/{username}", "exists_status": [200], "missing_status": [404], "missing_text": "Not Found"},
+  {"name": "GitLab", "category": "coding", "url": "https://gitlab.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Bitbucket", "category": "coding", "url": "https://bitbucket.org/{username}/", "exists_status": [200], "missing_status": [404]},
+  {"name": "CodePen", "category": "coding", "url": "https://codepen.io/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Replit", "category": "coding", "url": "https://replit.com/@{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Dev.to", "category": "coding", "url": "https://dev.to/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Stack Overflow", "category": "coding", "url": "https://stackoverflow.com/users/{username}", "exists_status": [200], "missing_text": "Page Not Found"},
+  {"name": "HackerRank", "category": "coding", "url": "https://www.hackerrank.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "LeetCode", "category": "coding", "url": "https://leetcode.com/{username}/", "exists_status": [200], "missing_status": [404]},
+  {"name": "Kaggle", "category": "coding", "url": "https://www.kaggle.com/{username}", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Twitter/X", "category": "social", "url": "https://x.com/{username}", "exists_status": [200], "missing_text": "This account doesn't exist"},
+  {"name": "Instagram", "category": "social", "url": "https://www.instagram.com/{username}/", "exists_status": [200], "missing_text": "Sorry, this page isn't available"},
+  {"name": "Facebook", "category": "social", "url": "https://www.facebook.com/{username}/", "e_code": 200, "e_string": "__isProfile", "m_code": 200, "m_string": "<title>Facebook</title>"},
+  {"name": "LinkedIn", "category": "social", "url": "https://www.linkedin.com/in/{username}", "exists_status": [200], "missing_text": "Page not found"},
+  {"name": "Reddit", "category": "social", "url": "https://www.reddit.com/user/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "TikTok", "category": "social", "url": "https://www.tiktok.com/@{username}", "exists_status": [200], "missing_text": "Couldn't find this account"},
+  {"name": "Pinterest", "category": "social", "url": "https://www.pinterest.com/{username}/", "exists_status": [200], "missing_status": [404]},
+  {"name": "Snapchat", "category": "social", "url": "https://www.snapchat.com/add/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Threads", "category": "social", "url": "https://www.threads.net/@{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Mastodon.social", "category": "social", "url": "https://mastodon.social/@{username}", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "YouTube", "category": "media", "url": "https://www.youtube.com/@{username}", "exists_status": [200], "missing_text": "This page isn't available"},
+  {"name": "Twitch", "category": "media", "url": "https://www.twitch.tv/{username}", "exists_status": [200], "missing_text": "Sorry. Unless you've got a time machine"},
+  {"name": "SoundCloud", "category": "media", "url": "https://soundcloud.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Spotify", "category": "media", "url": "https://open.spotify.com/user/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Vimeo", "category": "media", "url": "https://vimeo.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Dailymotion", "category": "media", "url": "https://www.dailymotion.com/{username}", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Medium", "category": "blog", "url": "https://medium.com/@{username}", "exists_status": [200], "missing_text": "404"},
+  {"name": "Substack", "category": "blog", "url": "https://{username}.substack.com", "exists_status": [200], "missing_status": [404]},
+  {"name": "WordPress", "category": "blog", "url": "https://{username}.wordpress.com", "exists_status": [200], "missing_status": [404]},
+  {"name": "Blogger", "category": "blog", "url": "https://{username}.blogspot.com", "exists_status": [200], "missing_status": [404]},
+  {"name": "Tumblr", "category": "blog", "url": "https://{username}.tumblr.com", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Steam", "category": "gaming", "url": "https://steamcommunity.com/id/{username}", "exists_status": [200], "missing_text": "The specified profile could not be found"},
+  {"name": "Xbox Gamertag", "category": "gaming", "url": "https://account.xbox.com/en-us/profile?gamertag={username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Roblox", "category": "gaming", "url": "https://www.roblox.com/user.aspx?username={username}", "exists_status": [200], "missing_text": "Page cannot be found"},
+  {"name": "Chess.com", "category": "gaming", "url": "https://www.chess.com/member/{username}", "exists_status": [200], "missing_text": "Member not found"},
+
+  {"name": "Patreon", "category": "finance", "url": "https://www.patreon.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Buy Me a Coffee", "category": "finance", "url": "https://www.buymeacoffee.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Ko-fi", "category": "finance", "url": "https://ko-fi.com/{username}", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Flickr", "category": "images", "url": "https://www.flickr.com/people/{username}/", "exists_status": [200], "missing_status": [404]},
+  {"name": "DeviantArt", "category": "images", "url": "https://www.deviantart.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Behance", "category": "images", "url": "https://www.behance.net/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Dribbble", "category": "images", "url": "https://dribbble.com/{username}", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Keybase", "category": "security", "url": "https://keybase.io/{username}", "exists_status": [200], "missing_text": "can't find"},
+  {"name": "HackerOne", "category": "security", "url": "https://hackerone.com/{username}", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Product Hunt", "category": "business", "url": "https://www.producthunt.com/@{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "About.me", "category": "business", "url": "https://about.me/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Linktree", "category": "business", "url": "https://linktr.ee/{username}", "exists_status": [200], "missing_text": "Link not found"},
+
+  {"name": "Docker Hub", "category": "coding", "url": "https://hub.docker.com/u/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "npm", "category": "coding", "url": "https://www.npmjs.com/~{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "PyPI", "category": "coding", "url": "https://pypi.org/user/{username}/", "exists_status": [200], "missing_status": [404]},
+
+  {"name": "Telegram", "category": "messaging", "url": "https://t.me/{username}", "exists_status": [200], "missing_text": "If you have Telegram"},
+  {"name": "Gravatar", "category": "identity", "url": "https://en.gravatar.com/{username}", "exists_status": [200], "missing_text": "404"},
+  {"name": "Pastebin", "category": "misc", "url": "https://pastebin.com/u/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Giphy", "category": "misc", "url": "https://giphy.com/{username}", "exists_status": [200], "missing_status": [404]},
+  {"name": "Disqus", "category": "misc", "url": "https://disqus.com/by/{username}/", "exists_status": [200], "missing_status": [404]}
+]
