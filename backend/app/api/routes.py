@@ -51,6 +51,8 @@ from app.services.report_exporter import export_csv, export_html, export_json, e
 
 from app.services.cache import clear_cache
 
+from app.services.crypto import EncryptionError
+
 from app.services.runtime_settings import apply_runtime, get_enabled_modules, load_runtime, save_runtime
 
 from app.services.scheduler import start_scheduler
@@ -206,7 +208,19 @@ def update_settings(body: SettingsUpdate):
 
     if data:
 
-        save_runtime(data)
+        try:
+
+            save_runtime(data)
+
+        except EncryptionError:
+
+            raise HTTPException(
+
+                500,
+
+                "Could not encrypt sensitive settings. Check local encryption configuration.",
+
+            )
 
     return get_settings()
 
@@ -242,19 +256,31 @@ async def start_scan(body: ScanRequest, background_tasks: BackgroundTasks):
 
     modules = body.providers or get_enabled_modules()
 
-    if body.async_mode:
+    try:
 
-        started = engine.start_scan(body.profile, modules)
+        if body.async_mode:
 
-        background_tasks.add_task(
+            started = engine.start_scan(body.profile, modules)
 
-            engine.run_scan_background, started.id, body.profile, modules
+            background_tasks.add_task(
+
+                engine.run_scan_background, started.id, body.profile, modules
+
+            )
+
+            return started
+
+        return await engine.run_scan(body.profile, modules)
+
+    except EncryptionError:
+
+        raise HTTPException(
+
+            500,
+
+            "Could not encrypt the scan profile. Check local encryption configuration.",
 
         )
-
-        return started
-
-    return await engine.run_scan(body.profile, modules)
 
 
 

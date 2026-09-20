@@ -2,10 +2,9 @@
 
 import json
 import logging
-from pathlib import Path
 
 from app.config import PROJECT_ROOT
-from app.services.crypto import decrypt_text, encrypt_text
+from app.services.crypto import EncryptionError, decrypt_text, encrypt_text
 
 logger = logging.getLogger(__name__)
 _SECRETS_FILE = PROJECT_ROOT / "data" / "secrets.json"
@@ -17,8 +16,10 @@ def _load() -> dict:
     try:
         raw = json.loads(_SECRETS_FILE.read_text(encoding="utf-8"))
         return {k: decrypt_text(v) if isinstance(v, str) else v for k, v in raw.items()}
+    except EncryptionError:
+        raise
     except Exception as exc:
-        logger.warning("Could not load secrets: %s", exc)
+        logger.warning("Could not load secrets: %s", type(exc).__name__)
         return {}
 
 

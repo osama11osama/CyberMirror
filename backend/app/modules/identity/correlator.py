@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from urllib.parse import urlparse
 
-from app.models.schemas import Finding, FindingCategory, IdentityProfile
+from app.models.schemas import Finding, FindingCategory, FindingOutcome, IdentityProfile
 from app.modules.base import NativeModule
 
 
@@ -15,6 +15,7 @@ class IdentityCorrelatorModule(NativeModule):
     category = "identity_search"
 
     async def scan(self, profile: IdentityProfile, scan_id: str = "") -> list[Finding]:
+        # Standalone module run has no observed findings yet — seed fields alone are not evidence.
         return correlate_findings(profile, [], scan_id)
 
 
@@ -34,32 +35,26 @@ def _extract_handle(url: str) -> str | None:
     return None
 
 
+def _blob(finding: Finding) -> str:
+    return f"{finding.title} {finding.description} {finding.snippet} {finding.url}".lower()
+
+
+def _mentions(finding: Finding, *needles: str) -> bool:
+    text = _blob(finding)
+    return all(n and n.lower() in text for n in needles)
+
+
+def _supporting(existing: list[Finding], *needles: str) -> list[Finding]:
+    return [f for f in existing if _mentions(f, *needles)]
+
+
 def correlate_findings(
     profile: IdentityProfile,
     existing: list[Finding],
     scan_id: str = "",
 ) -> list[Finding]:
+    """Build correlations from observed findings only — never from seed inputs alone."""
     findings: list[Finding] = []
-
-    if profile.full_name and profile.username:
-        findings.append(_corr(
-            scan_id, "Name + Username linked",
-            "Same identity used across platforms — easier to trace",
-            profile,
-        ))
-    if profile.email and profile.full_name:
-        findings.append(_corr(
-            scan_id, "Email + Real Name exposed",
-            "High risk — real identity tied to email in public results",
-            profile,
-        ))
-    if profile.phone and profile.location:
-        findings.append(_corr(
-            scan_id, "Phone + Location exposed",
-            "Critical — enables physical-world identification",
-            profile,
-        ))
-
     if not existing:
         return findings
 
@@ -73,11 +68,46 @@ def correlate_findings(
         handle = _extract_handle(f.url)
         if handle:
             handle_platforms[handle].add(f.platform)
-        if profile.username and profile.username.lower() in f"{f.title} {f.url} {f.snippet}".lower():
+        if profile.username and profile.username.lower() in _blob(f):
             handle_platforms[profile.username.lower()].add(f.platform)
+
+    # Evidence-backed seed-field pairs: only when a public finding links both values.
+    if profile.full_name and profile.username:
+        support = _supporting(existing, profile.full_name, profile.username)
+        if support:
+            findings.append(_corr(
+                scan_id,
+                "Name + Username linked in public results",
+                "Observed sources mention both the real name and username together.",
+                profile,
+                support,
+            ))
+
+    if profile.email and profile.full_name:
+        support = _supporting(existing, profile.email, profile.full_name)
+        if support:
+            findings.append(_corr(
+                scan_id,
+                "Email + Real Name linked in public results",
+                "Observed sources mention both the email and real name together.",
+                profile,
+                support,
+            ))
+
+    if profile.phone and profile.location:
+        support = _supporting(existing, profile.phone, profile.location)
+        if support:
+            findings.append(_corr(
+                scan_id,
+                "Phone + Location linked in public results",
+                "Observed sources mention both the phone and location together.",
+                profile,
+                support,
+            ))
 
     real_platforms = list(by_platform.keys())
     if len(real_platforms) >= 5:
+        support = [f for plats in by_platform.values() for f in plats]
         findings.append(Finding(
             scan_id=scan_id,
             source="identity_correlator",
@@ -87,10 +117,21 @@ def correlate_findings(
             title=f"Username found on {len(real_platforms)} platforms",
             description=f"Platforms: {', '.join(sorted(real_platforms)[:15])}",
             confidence=0.9,
+            outcome=FindingOutcome.CONFIRMED,
+            raw={
+                "outcome": FindingOutcome.CONFIRMED.value,
+                "supporting_finding_ids": [f.id for f in support[:50]],
+                "platforms": sorted(real_platforms),
+            },
         ))
 
     for handle, platforms in handle_platforms.items():
         if len(platforms) >= 3 and handle != "www":
+            support = [
+                f for f in existing
+                if _extract_handle(f.url) == handle
+                or (profile.username and profile.username.lower() == handle and handle in _blob(f))
+            ]
             findings.append(Finding(
                 scan_id=scan_id,
                 source="identity_correlator",
@@ -100,6 +141,12 @@ def correlate_findings(
                 title=f"Handle '{handle}' linked across {len(platforms)} platforms",
                 description=f"Same URL handle on: {', '.join(sorted(platforms)[:10])}",
                 confidence=0.87,
+                outcome=FindingOutcome.CONFIRMED,
+                raw={
+                    "outcome": FindingOutcome.CONFIRMED.value,
+                    "supporting_finding_ids": [f.id for f in support[:50]],
+                    "platforms": sorted(platforms),
+                },
             ))
 
     high = [f for f in existing if f.risk_level.value in ("Critical", "High")]
@@ -113,12 +160,17 @@ def correlate_findings(
             title=f"{len(high)} high-risk exposures detected",
             description="Multiple sensitive data points found publicly",
             confidence=0.95,
+            outcome=FindingOutcome.CONFIRMED,
+            raw={
+                "outcome": FindingOutcome.CONFIRMED.value,
+                "supporting_finding_ids": [f.id for f in high[:50]],
+            },
         ))
 
     if profile.email:
         email_hits = [
             f for f in existing
-            if profile.email.lower() in f"{f.title} {f.snippet} {f.url}".lower()
+            if profile.email.lower() in _blob(f)
         ]
         if len(email_hits) >= 2:
             findings.append(Finding(
@@ -130,6 +182,11 @@ def correlate_findings(
                 title=f"Email appears in {len(email_hits)} public results",
                 description="Email widely indexed — consider alias addresses publicly",
                 confidence=0.88,
+                outcome=FindingOutcome.CONFIRMED,
+                raw={
+                    "outcome": FindingOutcome.CONFIRMED.value,
+                    "supporting_finding_ids": [f.id for f in email_hits[:50]],
+                },
             ))
 
     if profile.username:
@@ -148,12 +205,24 @@ def correlate_findings(
                 title=f"Username '{profile.username}' repeated in {len(title_matches)} findings",
                 description="Consistent username reuse increases traceability",
                 confidence=0.85,
+                outcome=FindingOutcome.CONFIRMED,
+                raw={
+                    "outcome": FindingOutcome.CONFIRMED.value,
+                    "supporting_finding_ids": [f.id for f in title_matches[:50]],
+                },
             ))
 
     return findings
 
 
-def _corr(scan_id: str, title: str, desc: str, profile: IdentityProfile) -> Finding:
+def _corr(
+    scan_id: str,
+    title: str,
+    desc: str,
+    profile: IdentityProfile,
+    support: list[Finding],
+) -> Finding:
+    sources = sorted({f.source or f.platform for f in support if f.source or f.platform})
     return Finding(
         scan_id=scan_id,
         source="identity_correlator",
@@ -161,7 +230,14 @@ def _corr(scan_id: str, title: str, desc: str, profile: IdentityProfile) -> Find
         category=FindingCategory.IDENTITY,
         platform="Correlation Engine",
         title=title,
-        description=desc,
-        confidence=0.95,
+        description=f"{desc} Supporting sources: {', '.join(sources[:8]) or 'observed findings'}.",
+        confidence=0.9,
+        outcome=FindingOutcome.CONFIRMED,
         snippet=f"{profile.full_name or ''} | {profile.username or ''} | {profile.location or ''}".strip(),
+        raw={
+            "outcome": FindingOutcome.CONFIRMED.value,
+            "supporting_finding_ids": [f.id for f in support[:50]],
+            "supporting_sources": sources[:20],
+            "evidence_backed": True,
+        },
     )
