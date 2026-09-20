@@ -7,6 +7,75 @@ on:
     branches: [main]
 
 jobs:
+  repository-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check public repository hygiene
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tracked="$(git ls-files)"
+
+          forbidden_files=(
+            ".env"
+            "data/wmn-data.json"
+            "data/runtime_settings.json"
+            "data/secrets.json"
+            "data/.api_token"
+            "data/.encryption_key"
+          )
+
+          for path in "${forbidden_files[@]}"; do
+            if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
+              echo "Runtime/private file must not be tracked: $path"
+              exit 1
+            fi
+          done
+
+          if git ls-files '*.sqlite3' | grep -q .; then
+            echo "SQLite runtime databases must not be tracked."
+            git ls-files '*.sqlite3'
+            exit 1
+          fi
+
+          # Reject common machine-specific absolute home/drive paths in tracked
+          # UTF-8 text. Keep examples portable and repository-relative.
+          python - <<'PY'
+          import pathlib
+          import re
+          import subprocess
+          import sys
+
+          files = subprocess.check_output(
+              ["git", "ls-files", "-z"]
+          ).decode().split("\0")
+
+          patterns = [
+              re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\\\"),
+              re.compile(r"/(?:Users|home)/[^/\s]+/"),
+          ]
+
+          findings = []
+          for name in files:
+              if not name:
+                  continue
+              path = pathlib.Path(name)
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+              for line_no, line in enumerate(text.splitlines(), 1):
+                  if any(pattern.search(line) for pattern in patterns):
+                      findings.append(f"{name}:{line_no}: {line.strip()}")
+
+          if findings:
+              print("Machine-specific absolute path(s) found in tracked text:")
+              print("\n".join(findings))
+              sys.exit(1)
+          PY
+
   backend:
     runs-on: ubuntu-latest
     steps:
