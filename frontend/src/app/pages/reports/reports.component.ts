@@ -140,8 +140,10 @@ export class ReportsComponent implements OnInit {
         const anchor = document.createElement('a');
         anchor.href = url;
         anchor.download = `cybermirror_${this.scanId.slice(0, 8)}.${format}`;
+        document.body.appendChild(anchor);
         anchor.click();
-        URL.revokeObjectURL(url);
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       });
     });
   }
