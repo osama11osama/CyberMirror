@@ -1,9 +1,8 @@
 """Persisted runtime settings (editable from UI)."""
 
 import json
-from pathlib import Path
 
-from app.config import PROJECT_ROOT, settings
+from app.config import PROJECT_ROOT, resolve_project_path, settings
 from app.services.secrets import get_secret, migrate_plaintext_hibp, set_secret
 
 RUNTIME_FILE = PROJECT_ROOT / "data" / "runtime_settings.json"
@@ -45,6 +44,8 @@ def load_runtime() -> dict:
 
 
 def save_runtime(data: dict) -> dict:
+    from app.modules.registry import DEFAULT_MODULES
+
     RUNTIME_FILE.parent.mkdir(parents=True, exist_ok=True)
     merged = load_runtime()
     if "hibp_api_key" in data:
@@ -71,11 +72,12 @@ def apply_runtime(data: dict | None = None) -> None:
     settings.schedule_interval_hours = int(data.get("schedule_interval_hours", 168))
     wmn = data.get("wmn_data_path")
     if wmn:
-        settings.wmn_data_path = Path(wmn)
+        settings.wmn_data_path = resolve_project_path(wmn)
 
 
 def get_enabled_modules() -> list[str]:
     from app.modules.registry import DEFAULT_MODULES
+
     rt = load_runtime()
     mods = rt.get("enabled_modules") or DEFAULT_MODULES
     return [m for m in mods if m in DEFAULT_MODULES] or list(DEFAULT_MODULES)
