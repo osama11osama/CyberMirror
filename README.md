@@ -116,6 +116,19 @@ npm start
 Backend API: `http://127.0.0.1:8787/api`  
 Frontend: `http://localhost:4200`
 
+### Local API authentication
+
+The normal launcher and Electron wrapper generate a fresh API token for each run. The token is passed to the backend and injected into the local UI without exposing it through `/api/health`. Browser sessions keep the credential in `sessionStorage`, and authenticated downloads send it in the `X-CyberMirror-Token` header.
+
+The health endpoint remains public so launchers can check readiness, but it does not return API credentials.
+
+For manual frontend/backend development, either:
+
+- keep authentication enabled, set the same `API_TOKEN` for the backend, and open the frontend once with `#api_token=<token>`; the UI immediately removes the fragment after importing the token; or
+- set `API_AUTH_ENABLED=false` only for a localhost-bound development session.
+
+Do not expose the backend beyond localhost when authentication is disabled.
+
 ## Optional WhatsMyName dataset
 
 CyberMirror includes a small fallback username catalog. For broader coverage, it can load the community-maintained [WhatsMyName](https://github.com/WebBreacher/WhatsMyName) dataset at runtime.
