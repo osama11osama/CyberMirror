@@ -1,100 +1,114 @@
-# CyberMirror v2.1.0
+# CyberMirror
 
-**See Yourself as the Internet Sees You**
+CyberMirror is a local-first OSINT self-audit application for reviewing a person's public digital footprint. It combines a FastAPI backend, an Angular frontend, local SQLite history, and a set of built-in scanners for public web, username, email, phone, domain, breach, and social-profile checks.
 
-CyberMirror is a **local OSINT self-audit platform**. Enter a name, username, email, or phone — the native engine searches the public web and hundreds of platforms, scores risk, and saves everything locally.
+> Use CyberMirror only for your own identifiers or for subjects who have explicitly authorized the investigation.
 
-> **Legal use only:** self-audit or with explicit permission. Public data only.
+## What it does
 
----
+CyberMirror can:
 
-## Version 2.0.0 — What's New
+- run multiple scan modules concurrently;
+- search the public web for identity-related results;
+- check public username profile URLs across a built-in catalog;
+- optionally extend username coverage with the WhatsMyName dataset;
+- inspect selected social profile URLs with Playwright;
+- look for public email and phone exposure;
+- query Have I Been Pwned when the user supplies an API key;
+- inspect public WHOIS/domain information;
+- correlate findings into a relationship graph;
+- store scan history locally;
+- compare scans and export reports.
 
-| Feature | Description |
-|---------|-------------|
-| **Parallel scanning** | All modules run concurrently — faster full scans |
-| **Live results** | Findings appear in Evidence Center while scan runs |
-| **Cancel scan** | Stop a long scan from the Investigation page |
-| **Recommendations** | Each finding shows risk reason + actionable advice |
-| **History pagination & delete** | Browse pages of past scans, remove old entries |
-| **Export download** | One-click browser download for HTML/JSON/CSV |
-| **Consent modal** | Legal acknowledgment before first investigation |
-| **WMN health check** | Settings warns if WhatsMyName database is missing |
-| **Email probes** | Spotify, Twitter/X, Adobe registration signals |
-| **Auto-setup launcher** | First run installs Python/npm deps automatically |
-| **Prod mode default** | `CyberMirror.bat` serves built UI (fast startup) |
+The project does **not** vendor or execute third-party OSINT applications. Optional external data and services are documented below.
 
----
+## Architecture
 
-## Version 1.0.0 — Core Platform
-
-| Feature | Description |
-|---------|-------------|
-| **8 native modules** | Web search, username scan (600+ sites), Playwright social browser, email, phone, breach check, domain/WHOIS, identity correlator |
-| **Investigation workspace** | Enter profile → async scan with progress bar |
-| **Evidence Center** | Filterable results: where, what, source, risk |
-| **Relationship graph** | Cytoscape graph — click node for details, double-click to open URL |
-| **Scan history** | All scans saved in SQLite — click row to view without re-scanning |
-| **Compare scans** | Select 2 history entries → see new/removed findings |
-| **Dashboard** | Risk score, charts, latest scan stats |
-| **Export** | HTML, JSON, CSV reports |
-| **Settings** | Scan limits, Playwright toggle, HIBP key, scheduled rescans |
-| **One-click launcher** | `CyberMirror.exe` / `.bat` — kills old processes, starts backend + frontend |
-
----
-
-## Quick Start
-
-### First-time setup
-
-```powershell
-cd backend
-pip install -r requirements.txt
-playwright install chromium
-
-cd ..\frontend
-npm install
+```text
+Angular UI
+   |
+   v
+FastAPI REST API
+   |
+   v
+Scan Engine
+   |-- Web Search
+   |-- Username Scanner
+   |-- Social Browser
+   |-- Email Scanner
+   |-- Phone Scanner
+   |-- Breach Scanner
+   |-- Domain Scanner
+   `-- Identity Correlator
+   |
+   +--> Risk analysis
+   +--> SQLite history
+   +--> Graph / reports
 ```
 
-### Run (recommended — production mode, default)
+A more detailed description is available in [docs/architecture.md](docs/architecture.md).
 
-```powershell
-# Double-click or run:
+## Privacy model
+
+CyberMirror stores its scan database, logs, cache, generated reports, runtime settings, API token, and encryption material under local runtime directories that are excluded from version control.
+
+Local storage does **not** mean that scanning is offline. Network-based modules send the identifiers needed for a check to external websites or services. For example:
+
+- web-search modules send search queries to the configured search provider;
+- username and social checks request public profile URLs;
+- the optional HIBP integration sends the queried email address to the HIBP API;
+- some email checks query public account-registration endpoints.
+
+Use only identifiers you are authorized to investigate, and review the terms and privacy policies of external services before enabling or distributing integrations.
+
+## Quick start
+
+### Requirements
+
+- Python 3.10+
+- Node.js 20+ recommended
+- Chromium installed through Playwright for browser-based checks
+
+### Backend
+
+```bash
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Linux/macOS
+source .venv/bin/activate
+
+pip install -r backend/requirements.txt
+playwright install chromium
+```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+### Run
+
+On Windows:
+
+```text
 CyberMirror.bat
 ```
 
-Dev mode (slow first compile):
+Or run the services manually:
 
-```powershell
-python launcher\cybermirror_launcher.py --dev
-```
-
-Or build the exe once:
-
-```powershell
-cd launcher
-.\build-exe.bat
-# Then double-click CyberMirror.exe
-```
-
-### What the launcher does
-
-1. Stops any previous backend (port **8787**) and frontend (port **4200**)
-2. Starts Python FastAPI backend
-3. Serves the Angular UI (prod build) or `ng serve` (dev)
-4. Opens **http://localhost:4200** in your browser
-5. Shows progress bar while starting
-
----
-
-## Manual start (developers)
-
-```powershell
-# Terminal 1 — Backend
+```bash
+# terminal 1
 cd backend
 python main.py
 
-# Terminal 2 — Frontend
+# terminal 2
 cd frontend
 npm start
 ```
@@ -102,114 +116,89 @@ npm start
 Backend API: `http://127.0.0.1:8787/api`  
 Frontend: `http://localhost:4200`
 
----
+## Optional WhatsMyName dataset
 
-## How It Works
+CyberMirror includes a small fallback username catalog. For broader coverage, it can load the community-maintained [WhatsMyName](https://github.com/WebBreacher/WhatsMyName) dataset at runtime.
 
-```
-You enter profile (name, username, email, phone…)
-        ↓
-POST /api/scans  →  background scan job
-        ↓
-Modules run (web search, 600+ username checks, Playwright, …)
-        ↓
-Findings deduplicated → risk analyzed → saved to SQLite
-        ↓
-View in Evidence Center / Graph / History / Export
+Place `wmn-data.json` at:
+
+```text
+data/wmn-data.json
 ```
 
-### Native engine modules
+or set `WMN_DATA_PATH` in your local `.env`.
 
-| ID | Module | What it does |
-|----|--------|--------------|
-| `web_search` | Web Search | DuckDuckGo with site-specific queries (facebook.com, instagram.com, …) |
-| `username_scan` | Username Scanner | 600+ platforms via WMN detection patterns |
-| `social_browser` | Social Browser | Playwright headless checks for Facebook, Instagram, LinkedIn, TikTok |
-| `email_scan` | Email Scanner | Public email exposure on the web |
-| `phone_scan` | Phone Scanner | Phone number web search |
-| `breach_scan` | Breach Scanner | Have I Been Pwned (optional API key) |
-| `domain_scan` | Domain Scanner | WHOIS + site mentions for personal websites |
-| `identity_correlator` | Identity Correlator | Risk linkage across profile fields |
-
-### Data storage (all local)
-
-| Path | Contents |
-|------|----------|
-| `data/cybermirror.sqlite3` | Scans, findings, profiles |
-| `data/logs/` | Backend + launcher logs |
-| `data/cache/` | Web search result cache |
-| `exports/` | Exported HTML/JSON/CSV reports |
-
----
-
-## Project structure
-
-```
-CyberMirror/
-├── backend/           FastAPI + native OSINT engine
-│   └── app/modules/   web_search, username, social, email, phone, breach, domain
-├── frontend/          Angular 19 UI
-├── launcher/          One-click Windows launcher + exe builder
-├── desktop/           Optional Electron wrapper
-├── data/              SQLite + logs (created at runtime)
-└── exports/           Report exports
-```
-
----
+The upstream dataset is **not** committed to this repository. Its license and attribution requirements remain in effect. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [backend/app/modules/username/ATTRIBUTION.md](backend/app/modules/username/ATTRIBUTION.md).
 
 ## Configuration
 
-Edit in **Settings** UI or `data/runtime_settings.json`:
+Copy `.env.example` to `.env` and change only the values you need.
 
-- `username_scan_limit` — max WMN platforms (default 600)
-- `web_search_max_queries` — DuckDuckGo query count
-- `wmn_data_path` — path to WhatsMyName JSON (data only)
-- `playwright_enabled` — browser checks for social platforms
-- `hibp_api_key` — optional breach API key
-- `schedule_enabled` — automatic weekly rescan
+Important local/runtime files are intentionally ignored by Git:
 
----
+- `.env`
+- `data/wmn-data.json`
+- `data/runtime_settings.json`
+- `data/secrets.json`
+- `data/.api_token`
+- `data/.encryption_key`
+- SQLite databases, cache, logs, and exports
 
-## API overview
+Do not commit API keys, personal scan data, generated reports, or machine-specific paths.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Backend status |
-| `/api/modules` | GET | Available scan modules |
-| `/api/scans` | POST | Start scan (async) |
-| `/api/scans/{id}/status` | GET | Scan progress |
-| `/api/scans/{id}` | GET | Full scan + findings |
-| `/api/scans` | GET | List scans (limit, offset) |
-| `/api/scans/count` | GET | Total scan count |
-| `/api/scans/{id}/cancel` | POST | Cancel running scan |
-| `/api/scans/{id}/findings/live` | GET | Live findings during scan |
-| `/api/scans/{id}` | DELETE | Delete scan |
-| `/api/scans/compare/{a}/{b}` | GET | Compare two scans |
-| `/api/scans/{id}/graph` | GET | Graph data |
-| `/api/scans/{id}/export` | POST | Export report |
-| `/api/scans/{id}/export/{fmt}/download` | GET | Download export file |
+## Project structure
 
----
+```text
+CyberMirror/
+├── backend/             FastAPI application and scan engine
+│   ├── app/
+│   │   ├── api/         REST routes
+│   │   ├── engine/      scan orchestration and job state
+│   │   ├── modules/     built-in scan modules
+│   │   ├── services/    risk, graph, auth, crypto, reporting
+│   │   └── storage/     SQLite persistence
+│   └── tests/
+├── frontend/            Angular application
+├── launcher/            Windows launcher and build helpers
+├── desktop/             optional Electron wrapper
+├── docs/                architecture documentation
+├── data/                local runtime data (ignored except .gitkeep)
+└── exports/             generated reports (ignored except .gitkeep)
+```
 
-## Tags & releases
+## Development
 
-| Tag | Description |
-|-----|-------------|
-| **v2.0.0** | Parallel scans, live results, cancel, recommendations, history delete, auto-setup |
-| **v1.0.0** | First stable release — native engine, history, graph, launcher |
+Backend tests:
 
----
+```bash
+cd backend
+python -m pytest tests/ -q
+```
 
-## License & ethics
+Frontend build:
 
-For **personal self-audit** or authorized investigations only.  
-Do not use against others without consent.  
-All data stays on your machine.
+```bash
+cd frontend
+npm ci
+npm run build
+```
 
----
+GitHub Actions runs both checks for pushes and pull requests targeting `main`.
 
-## Extending
+## Third-party software and data
 
-1. Create a class in `backend/app/modules/` extending `NativeModule`
-2. Register in `backend/app/modules/registry.py`
-3. Module appears automatically in the UI
+CyberMirror uses normal Python and JavaScript dependencies installed through package managers and can interact with external data/services. Those projects retain their own licenses and terms.
+
+The username fallback catalog has a separate attribution/licensing notice because some detection definitions are adapted from or cross-checked against WhatsMyName data. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+## Responsible use
+
+CyberMirror is intended for defensive self-audit, education, and authorized research. It is not designed for credential theft, unauthorized account access, harassment, or intrusive surveillance.
+
+Public information can still be personal data. Users are responsible for complying with applicable law, platform terms, and authorization requirements.
+
+## License
+
+CyberMirror-authored source code is copyright © 2026 osama11osama. All rights reserved unless a file explicitly states otherwise.
+
+Third-party data and dependencies are governed by their respective licenses. In particular, the username catalog attribution is documented separately.

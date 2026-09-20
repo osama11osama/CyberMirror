@@ -1,6 +1,18 @@
 # Changelog
 
+## Unreleased
 
+### Changed
+- Removed machine-specific paths and stale references to local OSINT tool folders.
+- Made the optional WhatsMyName dataset path portable and project-relative by default.
+- Replaced the historical adapter-oriented architecture document with documentation of the current native module architecture.
+- Added explicit third-party attribution and licensing notes for external data and services.
+- Clarified that scan history is stored locally while network-based modules necessarily send queries to external services.
+- Removed the obsolete `tools/` reference document.
+
+### Privacy
+- Local configuration, external datasets, runtime secrets, tokens, logs, and generated data remain excluded from version control.
+- Public documentation no longer includes developer workstation paths.
 
 ## [2.1.0] - 2026-05-31
 
@@ -24,103 +36,41 @@
 - HIBP key moved to encrypted `data/secrets.json`
 - `runtime_settings.json` secrets gitignored
 
----
-
 ## [2.0.0] - 2026-05-31
 
-
-
-Major performance and UX release.
-
-
-
 ### Added
-
-- **Parallel module execution** — independent scanners run concurrently via `asyncio.gather`
-
-- **Live findings** — results stream during scan (`GET /api/scans/{id}/findings/live`)
-
-- **Cancel scan** — stop a running job (`POST /api/scans/{id}/cancel`)
-
-- **Recommendations column** — risk reason + actionable advice in Evidence Center
-
-- **History pagination** — page through scans, delete individual entries
-
-- **Export download** — browser download via `/export/{format}/download`
-
-- **Consent modal** — legal/ethical use acknowledgment before first scan
-
-- **WMN health warning** — Settings shows alert when WhatsMyName data is missing
-
-- **Email service probes** — Spotify, Twitter/X, Adobe registration signals
-
-- **Real correlator** — cross-platform linkage after all modules finish
-
-- **Launcher auto-setup** — first run installs pip/npm deps + Playwright
-
-- **Production mode default** — `CyberMirror.bat` uses `--prod` by default
-
-
+- Parallel module execution with `asyncio`
+- Live findings during a scan
+- Cooperative scan cancellation
+- Risk reasons and recommendations in Evidence Center
+- History pagination and deletion
+- Export downloads
+- Consent modal before first investigation
+- WhatsMyName dataset health check
+- Email registration-signal probes
+- Finding correlation
+- First-run dependency setup in the launcher
+- Production-mode launcher
 
 ### Changed
-
-- Default app version → **2.0.0**
-
-- Removed unused legacy `adapters/` stubs
-
-
+- Default app version to 2.0.0
+- Removed unused legacy adapter stubs
 
 ### Tests
-
-- Added `test_job_store.py`, `test_correlator.py`
-
-
-
----
-
-
+- Added job-store and correlator tests
 
 ## [1.0.0] - 2026-05-31
 
-
-
-First public release.
-
-
-
 ### Added
-
-- Native OSINT engine with 8 modules (web search, username scan, social browser, email, phone, breach, domain, correlator)
-
-- Angular 19 web UI: Dashboard, Investigation, History, Graph, Settings, Reports
-
+- Native scan engine with web, username, social, email, phone, breach, domain, and correlation modules
+- Angular web UI with Dashboard, Investigation, History, Graph, Settings, and Reports
 - Async scans with progress polling
-
-- SQLite persistence — view saved scans without re-scanning
-
-- Relationship graph with node click (details) and double-click (open URL)
-
-- Scan comparison (2 selected history entries)
-
-- Risk scoring and recommendations engine
-
-- Export HTML, JSON, CSV
-
-- Windows launcher (`CyberMirror.exe`, `.bat`, `--prod` mode)
-
-- Settings UI for scan limits, Playwright, HIBP, scheduled rescans
-
-- WMN data integration (600+ platforms)
-
-- Playwright browser checks for Facebook, Instagram, LinkedIn, TikTok
-
-
-
-### Requirements
-
-- Python 3.10+
-
-- Node.js LTS
-
-- Optional: WhatsMyName JSON for full platform coverage
-
+- SQLite persistence
+- Relationship graph
+- Scan comparison
+- Risk scoring and recommendations
+- HTML, JSON, and CSV export
+- Windows launcher
+- Runtime settings
+- Optional WhatsMyName dataset support
+- Playwright browser checks

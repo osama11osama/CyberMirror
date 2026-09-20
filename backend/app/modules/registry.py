@@ -1,4 +1,4 @@
-"""Native module registry — CyberMirror proprietary engine only."""
+"""Registry for CyberMirror's built-in scan modules."""
 
 from app.modules.base import NativeModule
 from app.modules.breach.scanner import BreachScanModule
@@ -45,6 +45,6 @@ def list_modules() -> list[dict]:
             "available": True,
             "enabled": mid in enabled,
             "builtin": True,
-            "license": "CyberMirror Proprietary",
+            "license": "CyberMirror source (see LICENSE)",
         })
     return result

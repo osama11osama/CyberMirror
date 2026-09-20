@@ -1,11 +1,14 @@
 # CyberMirror
 .env
+.env.*
+!.env.example
 node_modules/
 dist/
 __pycache__/
 *.pyc
 .venv/
 data/*.sqlite3
+data/wmn-data.json
 exports/*
 !.gitkeep
 frontend/.angular/
