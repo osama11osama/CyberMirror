@@ -1,5 +1,4 @@
 @echo off
-title CyberMirror (Production Mode)
+REM Same as CyberMirror.bat (production mode)
 cd /d "%~dp0"
-python "%~dp0launcher\cybermirror_launcher.py" --prod
-if errorlevel 1 pause
+call "%~dp0CyberMirror.bat"

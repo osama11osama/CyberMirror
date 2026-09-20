@@ -192,6 +192,8 @@ def update_settings(body: SettingsUpdate):
 
         "schedule_enabled", "schedule_interval_hours", "cache_ttl_seconds",
 
+        "ahmia_max_results", "ahmia_max_queries",
+
         "enabled_modules", "locale",
 
     ):

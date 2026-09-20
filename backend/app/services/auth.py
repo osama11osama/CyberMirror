@@ -28,7 +28,8 @@ class ApiTokenMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if not settings.api_auth_enabled:
             return await call_next(request)
-
+        if request.method == "OPTIONS":
+            return await call_next(request)
         path = request.url.path.rstrip("/") or "/"
         if path in PUBLIC_PATHS or not path.startswith("/api"):
             return await call_next(request)

@@ -1,7 +1,9 @@
-"""Registry for CyberMirror's built-in scan modules."""
+"""Native module registry — CyberMirror proprietary engine only."""
 
 from app.modules.base import NativeModule
+from app.modules.ahmia.scanner import AhmiaSearchModule
 from app.modules.breach.scanner import BreachScanModule
+from app.modules.credential_leaks.scanner import CredentialLeaksModule
 from app.modules.domain.scanner import DomainScanModule
 from app.modules.email.scanner import EmailScanModule
 from app.modules.identity.correlator import IdentityCorrelatorModule
@@ -18,6 +20,8 @@ NATIVE_MODULES: dict[str, type[NativeModule]] = {
     "email_scan": EmailScanModule,
     "phone_scan": PhoneScanModule,
     "breach_scan": BreachScanModule,
+    "credential_leaks": CredentialLeaksModule,
+    "ahmia_search": AhmiaSearchModule,
     "domain_scan": DomainScanModule,
     "identity_correlator": IdentityCorrelatorModule,
 }

@@ -43,6 +43,18 @@ def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
         finding.risk_level = RiskLevel.HIGH
         finding.risk_reason = "Phone number and name exposed together"
         finding.recommendation = "Remove phone from public profiles and directories"
+    elif finding.platform.startswith("HIBP") or finding.source == "credential_leaks":
+        finding.risk_level = RiskLevel.CRITICAL if "password" in combined.lower() else RiskLevel.HIGH
+        finding.risk_reason = "Credential or breach exposure detected"
+        finding.recommendation = "Change passwords immediately; enable MFA; check for unauthorized account access"
+    elif finding.source == "ahmia_search" and finding.confidence >= 0.6:
+        finding.risk_level = RiskLevel.HIGH
+        finding.risk_reason = "Identity term found in Tor hidden-service index"
+        finding.recommendation = "Verify the match manually; rotate credentials if confirmed; avoid visiting unknown .onion links"
+    elif finding.source == "ahmia_search":
+        finding.risk_level = RiskLevel.MEDIUM
+        finding.risk_reason = "Possible Tor index mention (lower confidence)"
+        finding.recommendation = "Review manually — may be a generic or unrelated index hit"
     elif finding.category.value == "email_exposure":
         finding.risk_level = RiskLevel.HIGH
         finding.risk_reason = "Email registered on a public-facing service"

@@ -6,7 +6,6 @@ import { MatIconModule } from '@angular/material/icon';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts/core';
 import { ApiService } from '../../services/api.service';
-import { I18nService } from '../../services/i18n.service';
 
 @Component({
   selector: 'cm-dashboard',
@@ -15,12 +14,12 @@ import { I18nService } from '../../services/i18n.service';
   providers: [provideEchartsCore({ echarts })],
   template: `
     <div class="page-header">
-      <h1>{{ i18n.t('dashboard') }}</h1>
+      <h1>Dashboard</h1>
       <p class="subtitle">Overview of your public digital footprint</p>
     </div>
 
     <div class="scan-picker card" *ngIf="scans.length">
-      <label>{{ i18n.t('select_scan') }}</label>
+      <label>Select scan</label>
       <select [(ngModel)]="selectedScanId" (ngModelChange)="loadScan()">
         <option *ngFor="let s of scans" [value]="s.id">
           {{ s.created_at | date:'medium' }} — {{ s.profile.username || s.profile.email || 'scan' }} ({{ s.risk_score }})
@@ -55,7 +54,7 @@ import { I18nService } from '../../services/i18n.service';
 
     <div class="charts-row" *ngIf="stats">
       <div class="card chart-card wide">
-        <div class="card-header"><mat-icon>show_chart</mat-icon><h3>{{ i18n.t('risk_trend') }}</h3></div>
+        <div class="card-header"><mat-icon>show_chart</mat-icon><h3>Risk trend</h3></div>
         <div echarts [options]="trendChart" class="chart"></div>
       </div>
       <div class="card chart-card">
@@ -95,7 +94,7 @@ export class DashboardComponent implements OnInit {
   sourceChart: any = {};
   trendChart: any = {};
 
-  constructor(private api: ApiService, public i18n: I18nService) {}
+  constructor(private api: ApiService) {}
 
   ngOnInit() {
     this.api.listScans(30).subscribe(scans => {

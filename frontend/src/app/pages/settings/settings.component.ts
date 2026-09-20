@@ -3,7 +3,6 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { MatIconModule } from '@angular/material/icon';
 import { ApiService } from '../../services/api.service';
-import { I18nService } from '../../services/i18n.service';
 
 @Component({
   selector: 'cm-settings',
@@ -11,8 +10,8 @@ import { I18nService } from '../../services/i18n.service';
   imports: [CommonModule, FormsModule, MatIconModule],
   template: `
     <div class="page-header">
-      <h1>{{ i18n.t('settings') }}</h1>
-      <p class="subtitle">Configure scan depth, modules, security, and language</p>
+      <h1>Settings</h1>
+      <p class="subtitle">Configure scan depth, modules, and security</p>
     </div>
 
     <div class="grid">
@@ -26,13 +25,6 @@ import { I18nService } from '../../services/i18n.service';
 
       <div class="card">
         <div class="card-header"><mat-icon>tune</mat-icon><h3>Scan Configuration</h3></div>
-        <div class="form-field">
-          <label>{{ i18n.t('language') }}</label>
-          <select [(ngModel)]="locale" (ngModelChange)="setLocale($event)">
-            <option value="en">English</option>
-            <option value="ar">العربية</option>
-          </select>
-        </div>
         <div class="form-field">
           <label>Username platforms limit</label>
           <input type="number" [(ngModel)]="cfg.username_scan_limit" min="50" max="800" />
@@ -50,17 +42,21 @@ import { I18nService } from '../../services/i18n.service';
           Enable Playwright browser
         </label>
         <div class="form-field">
-          <label>HIBP API key (stored encrypted locally)</label>
+          <label>HIBP API key (breaches + paste dumps — stored encrypted locally)</label>
           <input [(ngModel)]="cfg.hibp_api_key" type="password" placeholder="Paste key — not shown after save" />
         </div>
+        <div class="form-field">
+          <label>Ahmia max results per scan</label>
+          <input type="number" [(ngModel)]="cfg.ahmia_max_results" min="3" max="30" />
+        </div>
         <button class="btn-primary" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save Settings' }}</button>
-        <button class="btn-secondary" style="margin-left:0.5rem" (click)="clearCache()">{{ i18n.t('clear_cache') }}</button>
+        <button class="btn-secondary" style="margin-left:0.5rem" (click)="clearCache()">Clear cache</button>
         <p class="success" *ngIf="saved">Settings saved.</p>
         <p class="success" *ngIf="cacheMsg">{{ cacheMsg }}</p>
       </div>
 
       <div class="card">
-        <div class="card-header"><mat-icon>checklist</mat-icon><h3>{{ i18n.t('enabled_modules') }}</h3></div>
+        <div class="card-header"><mat-icon>checklist</mat-icon><h3>Enabled modules</h3></div>
         <p class="error" *ngIf="loadError">{{ loadError }}</p>
         <label class="module-row" *ngFor="let m of modules">
           <input type="checkbox" [checked]="isEnabled(m.id)" (change)="toggleModule(m.id)" />
@@ -97,7 +93,6 @@ import { I18nService } from '../../services/i18n.service';
 export class SettingsComponent implements OnInit {
   modules: any[] = [];
   loadError = '';
-  locale = 'en';
   cacheMsg = '';
   cfg: any = {
     username_scan_limit: 600,
@@ -109,16 +104,17 @@ export class SettingsComponent implements OnInit {
     schedule_enabled: false,
     schedule_interval_hours: 168,
     cache_ttl_seconds: 3600,
+    ahmia_max_results: 10,
+    ahmia_max_queries: 3,
     enabled_modules: [] as string[],
   };
   saving = false;
   saved = false;
   wmnWarning = '';
 
-  constructor(private api: ApiService, public i18n: I18nService) {}
+  constructor(private api: ApiService) {}
 
   ngOnInit() {
-    this.locale = this.i18n.locale;
     this.api.health().subscribe({
       next: h => { if (h.wmn && !h.wmn.loaded) this.wmnWarning = h.wmn.message; },
     });
@@ -154,14 +150,10 @@ export class SettingsComponent implements OnInit {
     this.cfg.enabled_modules = list;
   }
 
-  setLocale(loc: 'en' | 'ar') {
-    this.i18n.setLocale(loc);
-  }
-
   save() {
     this.saving = true;
     this.saved = false;
-    this.api.updateSettings({ ...this.cfg, locale: this.locale }).subscribe({
+    this.api.updateSettings(this.cfg).subscribe({
       next: () => { this.saving = false; this.saved = true; this.cfg.hibp_api_key = ''; },
       error: () => { this.saving = false; },
     });
