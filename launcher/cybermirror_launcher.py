@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import subprocess
 import sys
 import threading
@@ -213,13 +214,20 @@ def _pipe_reader(proc: subprocess.Popen, log_path: Path, prefix: str) -> None:
         pass
 
 
-def spawn_logged(cmd: list[str], cwd: Path, name: str) -> subprocess.Popen:
+def spawn_logged(
+    cmd: list[str],
+    cwd: Path,
+    name: str,
+    env_overrides: dict[str, str] | None = None,
+) -> subprocess.Popen:
     log_path = logs_dir() / f"{name}.log"
     log(f"Starting {name}… (log: {log_path.name})")
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
     env["FORCE_COLOR"] = "0"
+    if env_overrides:
+        env.update(env_overrides)
 
     kwargs: dict = {
         "cwd": str(cwd),
@@ -435,7 +443,17 @@ def main() -> int:
     frontend_dir = root / "frontend"
 
     # --- Backend ---
-    _procs["backend"] = spawn_logged([python, "main.py"], backend_dir, "backend")
+    # Use a fresh per-run token and pass it to the UI through the URL fragment.
+    # Fragments are not sent to the HTTP server and the frontend removes it
+    # immediately after storing the token in sessionStorage.
+    api_token = secrets.token_urlsafe(32)
+    launch_url = f"{FRONTEND_URL}#api_token={api_token}"
+    _procs["backend"] = spawn_logged(
+        [python, "main.py"],
+        backend_dir,
+        "backend",
+        env_overrides={"API_TOKEN": api_token},
+    )
     if not wait_for_service(BACKEND_HEALTH, BACKEND_TIMEOUT, "Backend", _procs["backend"]):
         tail_log_errors("backend")
         stop_all()
@@ -498,7 +516,7 @@ def main() -> int:
         "frontend": _procs["frontend"].pid if _procs["frontend"] else 0,
     })
 
-    webbrowser.open(FRONTEND_URL)
+    webbrowser.open(launch_url)
     log("")
     log("=" * 50)
     log(f"  CyberMirror is running → {FRONTEND_URL}")
@@ -506,7 +524,7 @@ def main() -> int:
     log("  Keep this window open. Ctrl+C or tray icon to stop.")
     log("=" * 50)
 
-    start_tray(on_stop=stop_all, on_open=lambda: webbrowser.open(FRONTEND_URL))
+    start_tray(on_stop=stop_all, on_open=lambda: webbrowser.open(launch_url))
 
     try:
         while True:

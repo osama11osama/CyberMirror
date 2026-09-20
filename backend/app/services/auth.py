@@ -1,4 +1,4 @@
-"""Local API token — prevents other processes from accessing CyberMirror API."""
+"""Local API-token authentication for protected CyberMirror API routes."""
 
 import secrets
 from pathlib import Path
@@ -28,10 +28,14 @@ class ApiTokenMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if not settings.api_auth_enabled:
             return await call_next(request)
+
         path = request.url.path.rstrip("/") or "/"
         if path in PUBLIC_PATHS or not path.startswith("/api"):
             return await call_next(request)
-        token = request.headers.get("X-CyberMirror-Token") or request.query_params.get("token")
-        if token != get_or_create_token():
+
+        provided = request.headers.get("X-CyberMirror-Token")
+        expected = get_or_create_token()
+        if not provided or not secrets.compare_digest(provided, expected):
             return JSONResponse({"detail": "Invalid or missing API token"}, status_code=401)
+
         return await call_next(request)

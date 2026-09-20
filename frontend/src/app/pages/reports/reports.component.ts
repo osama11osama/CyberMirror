@@ -135,8 +135,16 @@ export class ReportsComponent implements OnInit {
   export(format: string) {
     this.api.export(this.scanId, format).subscribe((res: ExportResponse) => {
       this.message = `Exported ${format.toUpperCase()} → ${res.path}`;
-      const url = this.api.exportDownloadUrl(this.scanId, format === 'pdf' ? 'pdf' : format);
-      window.open(url, '_blank');
+      this.api.downloadExport(this.scanId, format).subscribe((blob: Blob) => {
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `cybermirror_${this.scanId.slice(0, 8)}.${format}`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      });
     });
   }
 

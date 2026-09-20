@@ -1,7 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, interval, switchMap, takeWhile, last, tap } from 'rxjs';
-import { storeApiToken } from './auth.interceptor';
+import { Observable, interval, switchMap, takeWhile, last } from 'rxjs';
 
 const API = (window as any).cyberMirror?.apiBase ?? 'http://127.0.0.1:8787/api';
 
@@ -48,9 +47,7 @@ export class ApiService {
   constructor(private http: HttpClient) {}
 
   health(): Observable<any> {
-    return this.http.get<any>(`${API}/health`).pipe(
-      tap((h: any) => { if (h?.api_token) storeApiToken(h.api_token); })
-    );
+    return this.http.get<any>(`${API}/health`);
   }
 
   modules(): Observable<any[]> { return this.http.get<any[]>(`${API}/modules`); }
@@ -107,9 +104,9 @@ export class ApiService {
     return this.http.post<ExportResponse>(`${API}/scans/${id}/export`, { format });
   }
 
-  exportDownloadUrl(id: string, format: string): string {
-    const token = localStorage.getItem('cybermirror_api_token');
-    const base = `${API}/scans/${id}/export/${format}/download`;
-    return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+  downloadExport(id: string, format: string): Observable<Blob> {
+    return this.http.get(`${API}/scans/${id}/export/${format}/download`, {
+      responseType: 'blob',
+    });
   }
 }

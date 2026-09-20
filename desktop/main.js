@@ -1,11 +1,17 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, ipcMain } = require("electron");
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const http = require("http");
 const path = require("path");
 
 const BACKEND_PORT = 8787;
 const BACKEND_HEALTH = `http://127.0.0.1:${BACKEND_PORT}/api/health`;
 let backendProcess = null;
+const apiToken = crypto.randomBytes(32).toString("base64url");
+
+ipcMain.on("cybermirror:get-api-token", (event) => {
+  event.returnValue = apiToken;
+});
 
 function waitForBackend(timeoutMs = 90000) {
   return new Promise((resolve, reject) => {
@@ -33,6 +39,7 @@ function startBackend() {
     cwd: backendDir,
     stdio: "inherit",
     shell: isWin,
+    env: { ...process.env, API_TOKEN: apiToken },
   });
 
   backendProcess.on("error", (err) => {
