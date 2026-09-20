@@ -116,6 +116,20 @@ npm start
 Backend API: `http://127.0.0.1:8787/api`  
 Frontend: `http://localhost:4200`
 
+### Docker
+
+```bash
+docker compose up --build
+```
+
+- UI + API: `http://localhost:8787` (static UI is bundled in the image; API under `/api`)
+- Health: `http://localhost:8787/api/health`
+- Compose binds the server to `0.0.0.0` inside the container so port `8787` is reachable. Local non-Docker defaults remain `127.0.0.1`.
+- Named volumes persist `data/` (SQLite, API token, logs) and `exports/`.
+- Image build **fails** if Playwright/Chromium cannot be installed (no silent `|| true`).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflow, issue/PR templates, and scanner guidelines.
+
 ### Local API authentication
 
 The normal launcher and Electron wrapper generate a fresh API token for each run. The token is passed to the backend and injected into the local UI without exposing it through `/api/health`. Browser sessions keep the credential in `sessionStorage`, and authenticated downloads send it in the `X-CyberMirror-Token` header.
@@ -181,6 +195,8 @@ CyberMirror/
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, Docker, PR expectations, privacy rules, and how to add scanners.
+
 Backend tests:
 
 ```bash
@@ -196,7 +212,7 @@ npm ci
 npm run build
 ```
 
-GitHub Actions runs both checks for pushes and pull requests targeting `main`.
+GitHub Actions runs hygiene, backend tests, frontend build, and a Docker smoke check for pushes and pull requests targeting `main`.
 
 ## Third-party software and data
 

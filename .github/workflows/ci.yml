@@ -174,3 +174,25 @@ jobs:
         run: |
           npm ci
           npm run build
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t cybermirror:ci .
+      - name: Run container and hit health
+        run: |
+          set -euo pipefail
+          docker run -d --name cm-ci -p 8787:8787 -e HOST=0.0.0.0 cybermirror:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8787/api/health | grep -q '"status"'; then
+              echo "health ok"
+              docker stop cm-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs cm-ci || true
+          docker stop cm-ci || true
+          exit 1

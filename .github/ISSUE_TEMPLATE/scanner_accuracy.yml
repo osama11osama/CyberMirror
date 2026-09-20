@@ -1,0 +1,53 @@
+name: Scanner accuracy
+description: Report a false positive/negative or module accuracy issue
+title: "[scanner] "
+labels: ["scanner"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provide **reproducible evidence with fictional or public demo identifiers only**.
+        Do not attach real scan exports, databases, or private profile URLs that identify a real person without authorization.
+  - type: dropdown
+    id: module
+    attributes:
+      label: Module
+      options:
+        - web_search
+        - username_scan
+        - social_browser
+        - email_scan
+        - phone_scan
+        - breach_scan
+        - credential_leaks
+        - ahmia_search
+        - domain_scan
+        - identity_correlator
+        - other / unsure
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Issue kind
+      options:
+        - False positive (reported a hit that should not count)
+        - False negative (missed an expected public hit)
+        - Crash / timeout / inconclusive wrongly labeled
+        - Other accuracy problem
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction (placeholders only)
+      description: e.g. username `demo_user_123`, expected public URL pattern, outcome seen.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence summary
+      description: Redacted snippets, HTTP status patterns, or screenshots with PII removed.
+    validations:
+      required: false
