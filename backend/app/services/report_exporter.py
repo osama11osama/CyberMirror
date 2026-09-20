@@ -1,12 +1,38 @@
 """Report export service."""
 
 import csv
+import html
 import json
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
-from app.config import settings
-from app.models.schemas import Finding, IdentityProfile, ScanSummary
+from app.models.schemas import Finding, ScanSummary
+
+_ALLOWED_HREF_SCHEMES = {"http", "https"}
+
+
+def _html(value: object) -> str:
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def safe_report_href(url: str) -> str | None:
+    """Return an escaped http(s) href, or None for empty/unsafe URLs."""
+    raw = (url or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    if parsed.scheme.lower() not in _ALLOWED_HREF_SCHEMES or not parsed.netloc:
+        return None
+    return _html(raw)
+
+
+def _finding_link(finding: Finding) -> str:
+    title = _html(finding.title)
+    href = safe_report_href(finding.url)
+    if href:
+        return f'<a href="{href}">{title}</a>'
+    return title
 
 
 def export_json(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
@@ -40,19 +66,19 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
     for f in findings:
         rows += f"""
         <tr>
-          <td>{f.risk_level.value}</td>
-          <td>{f.source}</td>
-          <td>{f.platform}</td>
-          <td><a href="{f.url}">{f.title}</a></td>
-          <td>{f.risk_reason}</td>
-          <td>{f.recommendation}</td>
+          <td>{_html(f.risk_level.value)}</td>
+          <td>{_html(f.source)}</td>
+          <td>{_html(f.platform)}</td>
+          <td>{_finding_link(f)}</td>
+          <td>{_html(f.risk_reason)}</td>
+          <td>{_html(f.recommendation)}</td>
         </tr>"""
 
-    html = f"""<!DOCTYPE html>
+    markup = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>CyberMirror Report — {scan.id[:8]}</title>
+  <title>CyberMirror Report — {_html(scan.id[:8])}</title>
   <style>
     body {{ font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 2rem; }}
     h1 {{ color: #58a6ff; }}
@@ -67,8 +93,8 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
 <body>
   <h1>CyberMirror Self-Audit Report</h1>
   <p><strong>Slogan:</strong> See Yourself as the Internet Sees You</p>
-  <p>Scan ID: {scan.id} | Risk Score: {scan.risk_score} | Findings: {scan.finding_count}</p>
-  <p>Generated: {datetime.utcnow().isoformat()} UTC</p>
+  <p>Scan ID: {_html(scan.id)} | Risk Score: {_html(scan.risk_score)} | Findings: {_html(scan.finding_count)}</p>
+  <p>Generated: {_html(datetime.utcnow().isoformat())} UTC</p>
   <table>
     <thead><tr>
       <th>Risk</th><th>Source</th><th>Platform</th><th>Finding</th>
@@ -81,7 +107,7 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
   </footer>
 </body>
 </html>"""
-    path.write_text(html, encoding="utf-8")
+    path.write_text(markup, encoding="utf-8")
     return path
 
 
