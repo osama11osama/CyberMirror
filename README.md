@@ -20,7 +20,7 @@ CyberMirror can:
 - store scan history locally;
 - compare scans and export reports.
 
-The project does **not** vendor or execute Maigret, Sherlock, Holehe, SpiderFoot, GHunt, Recon-ng, or similar third-party OSINT applications.
+The project does **not** vendor or execute third-party OSINT applications. Optional external data and services are documented below.
 
 ## Architecture
 
