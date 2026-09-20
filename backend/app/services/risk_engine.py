@@ -20,6 +20,7 @@ _NEGATIVE_TITLE_MARKERS = (
     "no known breaches",
     "no credential leaks found",
     "no breaches found",
+    "no tor index matches found",
 )
 _INCONCLUSIVE_TITLE_MARKERS = (
     "inconclusive",

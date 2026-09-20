@@ -85,3 +85,29 @@ def test_registration_signal_is_medium_not_breach_critical():
     analyze_finding(f, IdentityProfile(email="jane@example.com"))
     assert f.risk_level == RiskLevel.MEDIUM
     assert f.outcome == FindingOutcome.CONFIRMED
+
+
+def test_ahmia_negative_status_is_not_high_risk():
+    f = Finding(
+        source="ahmia_search", platform="Ahmia",
+        title="No Tor index matches found",
+        category=FindingCategory.ADVANCED, confidence=0.7,
+        outcome=FindingOutcome.NEGATIVE,
+        description="Rotate passwords periodically and enable MFA.",
+    )
+    analyze_finding(f, IdentityProfile(username="jane"))
+    assert f.risk_level == RiskLevel.INFO
+    assert f.outcome == FindingOutcome.NEGATIVE
+
+
+def test_negative_credential_advice_with_password_word_is_not_critical():
+    f = Finding(
+        source="credential_leaks", platform="HIBP",
+        title="No credential leaks found for jane@example.com",
+        category=FindingCategory.EMAIL, confidence=0.92,
+        outcome=FindingOutcome.NEGATIVE,
+        description="Rotate passwords periodically and enable MFA.",
+    )
+    analyze_finding(f, IdentityProfile(email="jane@example.com"))
+    assert f.risk_level == RiskLevel.INFO
+    assert f.risk_level != RiskLevel.CRITICAL

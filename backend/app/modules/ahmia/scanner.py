@@ -6,7 +6,7 @@ import re
 
 from app.config import settings
 from app.engine.scan_context import raise_if_cancelled
-from app.models.schemas import Finding, FindingCategory, IdentityProfile
+from app.models.schemas import Finding, FindingCategory, FindingOutcome, IdentityProfile
 from app.modules.base import NativeModule
 from app.services.cache import get_cached, set_cached
 from app.services.rate_limiter import throttle
@@ -63,24 +63,33 @@ class AhmiaSearchModule(NativeModule):
                 title="No search terms",
                 description="Enter an email, username, or full name to search the Ahmia Tor index.",
                 confidence=0.0,
+                outcome=FindingOutcome.SYSTEM,
+                raw={"outcome": FindingOutcome.SYSTEM.value},
             )]
 
         findings: list[Finding] = []
         seen_onions: set[str] = set()
+        search_ok = False
 
         if settings.playwright_enabled:
             for query, label in queries:
                 raise_if_cancelled(scan_id)
-                batch = await self._playwright_search(query, label, scan_id, seen_onions)
+                batch, ok = await self._playwright_search(query, label, scan_id, seen_onions)
+                search_ok = search_ok or ok
                 findings.extend(batch)
                 if len(findings) >= settings.ahmia_max_results:
                     break
 
         if not findings:
-            findings.extend(await self._ddgs_fallback(queries, scan_id, seen_onions))
+            fallback, ok = await self._ddgs_fallback(queries, scan_id, seen_onions)
+            search_ok = search_ok or ok
+            findings.extend(fallback)
 
-        if not findings:
-            findings.append(Finding(
+        if findings:
+            return findings[: settings.ahmia_max_results]
+
+        if search_ok:
+            return [Finding(
                 scan_id=scan_id, source=self.id, provider="AhmiaSearchModule",
                 category=FindingCategory.ADVANCED, platform="Ahmia",
                 title="No Tor index matches found",
@@ -89,9 +98,22 @@ class AhmiaSearchModule(NativeModule):
                     "This does not guarantee absence from unindexed dark web content."
                 ),
                 confidence=0.7,
-            ))
+                outcome=FindingOutcome.NEGATIVE,
+                raw={"outcome": FindingOutcome.NEGATIVE.value},
+            )]
 
-        return findings[: settings.ahmia_max_results]
+        return [Finding(
+            scan_id=scan_id, source=self.id, provider="AhmiaSearchModule",
+            category=FindingCategory.ADVANCED, platform="Ahmia",
+            title="Ahmia search inconclusive",
+            description=(
+                "Could not complete an Ahmia index search (browser/network/fallback unavailable). "
+                "Absence from the Tor index was not verified."
+            ),
+            confidence=0.3,
+            outcome=FindingOutcome.INCONCLUSIVE,
+            raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
+        )]
 
     async def _playwright_search(
         self,
@@ -99,16 +121,16 @@ class AhmiaSearchModule(NativeModule):
         label: str,
         scan_id: str,
         seen_onions: set[str],
-    ) -> list[Finding]:
+    ) -> tuple[list[Finding], bool]:
         cache_key = f"ahmia:{query}"
         cached = get_cached(cache_key)
         if cached is not None:
-            return self._hits_to_findings(cached, query, label, scan_id, seen_onions)
+            return self._hits_to_findings(cached, query, label, scan_id, seen_onions), True
 
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            return []
+            return [], False
 
         hits: list[dict] = []
         try:
@@ -125,7 +147,7 @@ class AhmiaSearchModule(NativeModule):
                 inp = await page.query_selector('input[name="q"], input[type="search"], input')
                 if not inp:
                     await browser.close()
-                    return []
+                    return [], False
                 await inp.fill(query.strip('"'))
                 await inp.press("Enter")
                 await page.wait_for_load_state("networkidle", timeout=45000)
@@ -141,10 +163,10 @@ class AhmiaSearchModule(NativeModule):
                 await browser.close()
         except Exception as exc:
             logger.warning("Ahmia Playwright search failed: %s", exc)
-            return []
+            return [], False
 
         set_cached(cache_key, hits)
-        return self._hits_to_findings(hits, query, label, scan_id, seen_onions)
+        return self._hits_to_findings(hits, query, label, scan_id, seen_onions), True
 
     def _hits_to_findings(
         self,
@@ -175,7 +197,8 @@ class AhmiaSearchModule(NativeModule):
                 ),
                 snippet=f"{onion} · {description[:200]} · last seen {hit.get('lastSeen', '?')}",
                 confidence=0.72 if label == "email" else 0.62,
-                raw={"query": query, "label": label, **hit},
+                outcome=FindingOutcome.CONFIRMED,
+                raw={"query": query, "label": label, "outcome": FindingOutcome.CONFIRMED.value, **hit},
             ))
             if len(findings) >= settings.ahmia_max_results:
                 break
@@ -186,13 +209,14 @@ class AhmiaSearchModule(NativeModule):
         queries: list[tuple[str, str]],
         scan_id: str,
         seen_onions: set[str],
-    ) -> list[Finding]:
+    ) -> tuple[list[Finding], bool]:
         try:
             from ddgs import DDGS
         except ImportError:
-            return []
+            return [], False
 
         findings: list[Finding] = []
+        completed = False
         for query, label in queries:
             raise_if_cancelled(scan_id)
             ddg_query = f'site:ahmia.fi "{query.strip(chr(34))}"'
@@ -202,6 +226,7 @@ class AhmiaSearchModule(NativeModule):
                     results = await asyncio.to_thread(
                         lambda q=ddg_query: list(ddgs.text(q, max_results=5))
                     )
+                completed = True
                 for item in results:
                     body = item.get("body") or ""
                     url = item.get("href") or item.get("link") or ""
@@ -221,7 +246,9 @@ class AhmiaSearchModule(NativeModule):
                         ),
                         snippet=body[:300],
                         confidence=0.45,
+                        outcome=FindingOutcome.CONFIRMED,
+                        raw={"outcome": FindingOutcome.CONFIRMED.value},
                     ))
             except Exception as exc:
                 logger.debug("Ahmia DDGS fallback failed: %s", exc)
-        return findings
+        return findings, completed
