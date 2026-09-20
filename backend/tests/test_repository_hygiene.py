@@ -16,14 +16,18 @@ def _contains_machine_path(line: str) -> bool:
 
 def test_hygiene_detects_windows_backslash_and_forward_slash_paths():
     windows_path = "C:" + chr(92) + "Users" + chr(92) + "alice" + chr(92) + "file.txt"
+    windows_forward = "C:" + "/" + "Users/alice/file.txt"
+    posix_home = "/" + "home/alice/file.txt"
+    macos_users = "/" + "Users/alice/file.txt"
     assert _contains_machine_path(windows_path)
-    assert _contains_machine_path("C:/Users/alice/file.txt")
-    assert _contains_machine_path("path=C:/Users/alice/file.txt")
-    assert _contains_machine_path("/home/alice/file.txt")
-    assert _contains_machine_path("/Users/alice/file.txt")
+    assert _contains_machine_path(windows_forward)
+    assert _contains_machine_path("path=" + windows_forward)
+    assert _contains_machine_path(posix_home)
+    assert _contains_machine_path(macos_users)
 
 
 def test_hygiene_ignores_path_like_segments_inside_urls():
+    windows_forward = "C:" + "/" + "Users/alice/file.txt"
     assert not _contains_machine_path("https://example.com/home/alice/profile")
     assert not _contains_machine_path("See https://example.com/Users/alice/profile")
-    assert not _contains_machine_path("https://cdn.example.com/C:/Users/alice/file.txt")
+    assert not _contains_machine_path("https://cdn.example.com/" + windows_forward)
