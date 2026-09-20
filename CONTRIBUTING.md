@@ -94,7 +94,7 @@ Do **not** commit or paste into public issues/PRs:
 - `.env`, API tokens, HIBP keys, encryption keys
 - `data/*.sqlite3`, `data/secrets.json`, `data/.api_token`, scan exports
 - Real personal identifiers used in scans
-- Machine-specific absolute paths (`C:\Users\...`, `/home/...`)
+- Machine-specific absolute paths (Windows user-profile paths, POSIX home directories)
 
 CI rejects tracked private runtime files and machine paths in tracked text.
 
