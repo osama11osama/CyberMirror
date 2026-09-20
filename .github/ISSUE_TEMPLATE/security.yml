@@ -1,0 +1,30 @@
+name: Security report (public — limited detail)
+description: High-level security concern without exploit details or private data
+title: "[security] "
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not** publish exploit steps, credentials, private scan data, or personal identifiers here.
+        Prefer contacting the maintainer privately for sensitive reports. Use this form only for non-exploitable, high-level descriptions.
+  - type: textarea
+    id: summary
+    attributes:
+      label: High-level summary
+      description: What component is affected and what class of issue (auth, crypto, data exposure, etc.)?
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential impact (non-exploitable)
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have not included exploit PoCs, secrets, or real personal data in this issue
+          required: true

@@ -69,26 +69,33 @@ class AhmiaSearchModule(NativeModule):
 
         findings: list[Finding] = []
         seen_onions: set[str] = set()
-        search_ok = False
+        # Track success per identity query — NEGATIVE only when every term was searched.
+        query_ok: dict[str, bool] = {query: False for query, _ in queries}
 
         if settings.playwright_enabled:
             for query, label in queries:
                 raise_if_cancelled(scan_id)
                 batch, ok = await self._playwright_search(query, label, scan_id, seen_onions)
-                search_ok = search_ok or ok
+                if ok:
+                    query_ok[query] = True
                 findings.extend(batch)
                 if len(findings) >= settings.ahmia_max_results:
                     break
 
         if not findings:
-            fallback, ok = await self._ddgs_fallback(queries, scan_id, seen_onions)
-            search_ok = search_ok or ok
-            findings.extend(fallback)
+            pending = [(q, label) for q, label in queries if not query_ok[q]]
+            if pending:
+                fallback, completed = await self._ddgs_fallback(
+                    pending, scan_id, seen_onions
+                )
+                for query in completed:
+                    query_ok[query] = True
+                findings.extend(fallback)
 
         if findings:
             return findings[: settings.ahmia_max_results]
 
-        if search_ok:
+        if all(query_ok.values()):
             return [Finding(
                 scan_id=scan_id, source=self.id, provider="AhmiaSearchModule",
                 category=FindingCategory.ADVANCED, platform="Ahmia",
@@ -107,7 +114,8 @@ class AhmiaSearchModule(NativeModule):
             category=FindingCategory.ADVANCED, platform="Ahmia",
             title="Ahmia search inconclusive",
             description=(
-                "Could not complete an Ahmia index search (browser/network/fallback unavailable). "
+                "Could not complete an Ahmia index search for every identity term "
+                "(browser/network/fallback unavailable). "
                 "Absence from the Tor index was not verified."
             ),
             confidence=0.3,
@@ -209,14 +217,15 @@ class AhmiaSearchModule(NativeModule):
         queries: list[tuple[str, str]],
         scan_id: str,
         seen_onions: set[str],
-    ) -> tuple[list[Finding], bool]:
+    ) -> tuple[list[Finding], set[str]]:
+        """Return findings and the set of query strings that completed successfully."""
         try:
             from ddgs import DDGS
         except ImportError:
-            return [], False
+            return [], set()
 
         findings: list[Finding] = []
-        completed = False
+        completed: set[str] = set()
         for query, label in queries:
             raise_if_cancelled(scan_id)
             ddg_query = f'site:ahmia.fi "{query.strip(chr(34))}"'
@@ -226,7 +235,7 @@ class AhmiaSearchModule(NativeModule):
                     results = await asyncio.to_thread(
                         lambda q=ddg_query: list(ddgs.text(q, max_results=5))
                     )
-                completed = True
+                completed.add(query)
                 for item in results:
                     body = item.get("body") or ""
                     url = item.get("href") or item.get("link") or ""

@@ -724,5 +724,20 @@ def create_app():
 
     app.include_router(router)
 
+    # Serve the built Angular UI when present (Docker image and local prod builds).
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    from app.config import PROJECT_ROOT
+
+    for candidate in (
+        PROJECT_ROOT / "frontend" / "dist" / "cybermirror" / "browser",
+        PROJECT_ROOT / "frontend" / "dist",
+    ):
+        if (Path(candidate) / "index.html").is_file():
+            app.mount("/", StaticFiles(directory=str(candidate), html=True), name="ui")
+            break
+
     return app
 
