@@ -44,44 +44,64 @@ class CredentialLeaksModule(NativeModule):
 
         if has_api:
             raise_if_cancelled(scan_id)
-            findings.extend(await self._breach_findings(email, scan_id))
+            breach_result = await fetch_breaches(email)
+            findings.extend(self._breach_findings(email, scan_id, breach_result.items))
             raise_if_cancelled(scan_id)
-            findings.extend(await self._paste_findings(email, scan_id))
-        else:
-            findings.extend(await self._web_fallback(email, scan_id))
+            paste_result = await fetch_pastes(email)
+            findings.extend(self._paste_findings(email, scan_id, paste_result.items))
 
-        if not findings and has_api:
-            findings.append(Finding(
-                scan_id=scan_id, source=self.id, provider="CredentialLeaksModule",
-                category=FindingCategory.EMAIL, platform="HIBP",
-                title=f"No credential leaks found for {email}",
-                description=(
-                    "HIBP reports no breaches or paste dumps for this email. "
-                    "Rotate passwords periodically and enable MFA."
-                ),
-                confidence=0.92,
-                outcome=FindingOutcome.NEGATIVE,
-                raw={"outcome": FindingOutcome.NEGATIVE.value},
-            ))
-        elif not findings:
-            findings.append(Finding(
+            if findings:
+                return findings
+
+            if breach_result.ok and paste_result.ok:
+                return [Finding(
+                    scan_id=scan_id, source=self.id, provider="CredentialLeaksModule",
+                    category=FindingCategory.EMAIL, platform="HIBP",
+                    title=f"No credential leaks found for {email}",
+                    description=(
+                        "HIBP reports no breaches or paste dumps for this email. "
+                        "Rotate passwords periodically and enable MFA."
+                    ),
+                    confidence=0.92,
+                    outcome=FindingOutcome.NEGATIVE,
+                    raw={"outcome": FindingOutcome.NEGATIVE.value},
+                )]
+
+            errors = ", ".join(
+                e for e in (breach_result.error, paste_result.error) if e
+            ) or "request_failed"
+            return [Finding(
                 scan_id=scan_id, source=self.id, provider="CredentialLeaksModule",
                 category=FindingCategory.EMAIL, platform="HIBP",
                 title="Credential check inconclusive",
                 description=(
-                    "No HIBP API key configured — only limited paste-site web search was used. "
-                    "Add your key in Settings for authoritative breach and paste results."
+                    "HIBP could not be queried successfully, so absence of leaks was not verified. "
+                    f"Details: {errors}"
                 ),
                 confidence=0.35,
                 outcome=FindingOutcome.INCONCLUSIVE,
-                raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
-            ))
+                raw={"outcome": FindingOutcome.INCONCLUSIVE.value, "errors": errors},
+            )]
 
-        return findings
+        findings.extend(await self._web_fallback(email, scan_id))
+        if findings:
+            return findings
+        return [Finding(
+            scan_id=scan_id, source=self.id, provider="CredentialLeaksModule",
+            category=FindingCategory.EMAIL, platform="HIBP",
+            title="Credential check inconclusive",
+            description=(
+                "No HIBP API key configured — only limited paste-site web search was used. "
+                "Add your key in Settings for authoritative breach and paste results."
+            ),
+            confidence=0.35,
+            outcome=FindingOutcome.INCONCLUSIVE,
+            raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
+        )]
 
-    async def _breach_findings(self, email: str, scan_id: str) -> list[Finding]:
+    def _breach_findings(self, email: str, scan_id: str, breaches: list[dict]) -> list[Finding]:
         findings: list[Finding] = []
-        for breach in await fetch_breaches(email):
+        for breach in breaches:
             name = breach.get("Name", "Unknown")
             data_classes = breach.get("DataClasses") or []
             has_passwords = any("password" in dc.lower() for dc in data_classes)
@@ -102,9 +122,9 @@ class CredentialLeaksModule(NativeModule):
             ))
         return findings
 
-    async def _paste_findings(self, email: str, scan_id: str) -> list[Finding]:
+    def _paste_findings(self, email: str, scan_id: str, pastes: list[dict]) -> list[Finding]:
         findings: list[Finding] = []
-        for paste in await fetch_pastes(email):
+        for paste in pastes:
             source = paste.get("Source", "Paste")
             paste_id = paste.get("Id", "?")
             findings.append(Finding(
@@ -168,6 +188,8 @@ class CredentialLeaksModule(NativeModule):
                         ),
                         snippet=(item.get("body") or "")[:300],
                         confidence=0.5,
+                        outcome=FindingOutcome.CONFIRMED,
+                        raw={"outcome": FindingOutcome.CONFIRMED.value},
                     ))
             except Exception as exc:
                 logger.debug("Credential web search failed for %s: %s", query, exc)

@@ -25,8 +25,24 @@ DEFAULTS = {
     "ahmia_max_results": 10,
     "ahmia_max_queries": 3,
     "enabled_modules": list(_ALL_MODULES),
+    "module_catalog": list(_ALL_MODULES),
     "locale": "en",
 }
+
+
+def _normalize_enabled_modules(data: dict, merged: dict) -> list[str]:
+    """Preserve user disables; only auto-enable brand-new catalog modules."""
+    if "enabled_modules" not in data:
+        return list(_ALL_MODULES)
+
+    saved = [m for m in (data.get("enabled_modules") or []) if m in _ALL_MODULES]
+    catalog = data.get("module_catalog")
+    if isinstance(catalog, list):
+        known = {m for m in catalog if isinstance(m, str)}
+        for mid in _ALL_MODULES:
+            if mid not in known and mid not in saved:
+                saved.append(mid)
+    return saved or list(_ALL_MODULES)
 
 
 def load_runtime() -> dict:
@@ -36,11 +52,8 @@ def load_runtime() -> dict:
         data = json.loads(RUNTIME_FILE.read_text(encoding="utf-8"))
         merged = dict(DEFAULTS)
         merged.update(data)
-        saved_mods = list(merged.get("enabled_modules") or [])
-        for mid in _ALL_MODULES:
-            if mid not in saved_mods:
-                saved_mods.append(mid)
-        merged["enabled_modules"] = saved_mods
+        merged["enabled_modules"] = _normalize_enabled_modules(data, merged)
+        merged["module_catalog"] = list(_ALL_MODULES)
         if "hibp_api_key" in data and data["hibp_api_key"]:
             migrate_plaintext_hibp(data["hibp_api_key"])
             merged.pop("hibp_api_key", None)
@@ -58,11 +71,12 @@ def save_runtime(data: dict) -> dict:
     merged = load_runtime()
     if "hibp_api_key" in data:
         set_secret("hibp_api_key", data.pop("hibp_api_key") or None)
-    merged.update({k: v for k, v in data.items() if k in DEFAULTS})
-    if "enabled_modules" in merged:
+    merged.update({k: v for k, v in data.items() if k in DEFAULTS or k == "module_catalog"})
+    if "enabled_modules" in data or "enabled_modules" in merged:
         merged["enabled_modules"] = [
-            m for m in merged["enabled_modules"] if m in DEFAULT_MODULES
+            m for m in (merged.get("enabled_modules") or []) if m in DEFAULT_MODULES
         ] or list(DEFAULT_MODULES)
+    merged["module_catalog"] = list(_ALL_MODULES)
     RUNTIME_FILE.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     apply_runtime(merged)
     return merged

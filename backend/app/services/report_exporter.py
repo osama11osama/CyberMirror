@@ -21,7 +21,10 @@ def safe_report_href(url: str) -> str | None:
     raw = (url or "").strip()
     if not raw:
         return None
-    parsed = urlparse(raw)
+    try:
+        parsed = urlparse(raw)
+    except ValueError:
+        return None
     if parsed.scheme.lower() not in _ALLOWED_HREF_SCHEMES or not parsed.netloc:
         return None
     return _html(raw)

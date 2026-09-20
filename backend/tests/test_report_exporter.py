@@ -42,6 +42,25 @@ def test_safe_report_href_allows_http_https_only():
     assert safe_report_href("") is None
 
 
+def test_safe_report_href_rejects_malformed_urls(monkeypatch):
+    def _boom(_raw):
+        raise ValueError("Invalid IPv6 URL")
+
+    monkeypatch.setattr("app.services.report_exporter.urlparse", _boom)
+    assert safe_report_href("https://[") is None
+
+
+def test_html_report_continues_when_url_parse_fails(tmp_path, monkeypatch):
+    def _boom(_raw):
+        raise ValueError("Invalid IPv6 URL")
+
+    monkeypatch.setattr("app.services.report_exporter.urlparse", _boom)
+    finding = _finding(title="Still exported", url="https://[")
+    markup = export_html(_scan(), [finding], tmp_path / "malformed.html").read_text(encoding="utf-8")
+    assert "Still exported" in markup
+    assert "<a href=" not in markup
+
+
 def test_html_report_escapes_script_title(tmp_path):
     finding = _finding(
         title="<script>alert(1)</script>",

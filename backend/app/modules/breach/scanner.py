@@ -27,15 +27,20 @@ class BreachScanModule(NativeModule):
 
         findings: list[Finding] = []
         has_api = bool(settings.hibp_api_key)
+        api_ok = False
 
         if has_api:
-            findings.extend(await self._hibp_api(email, scan_id))
+            api_findings, api_ok = await self._hibp_api(email, scan_id)
+            findings.extend(api_findings)
 
         if not findings:
             findings.extend(await self._web_fallback(email, scan_id))
 
-        if not findings and has_api:
-            findings.append(Finding(
+        if findings:
+            return findings
+
+        if has_api and api_ok:
+            return [Finding(
                 scan_id=scan_id, source=self.id, provider="BreachScanModule",
                 category=FindingCategory.EMAIL, platform="HIBP",
                 title=f"No known breaches for {email}",
@@ -43,28 +48,31 @@ class BreachScanModule(NativeModule):
                 confidence=0.92,
                 outcome=FindingOutcome.NEGATIVE,
                 raw={"outcome": FindingOutcome.NEGATIVE.value},
-            ))
-        elif not findings:
-            findings.append(Finding(
-                scan_id=scan_id, source=self.id, provider="BreachScanModule",
-                category=FindingCategory.EMAIL, platform="HIBP",
-                title="Breach check inconclusive",
-                description=(
-                    "No HIBP API key configured — only limited web search was used. "
-                    "Add your key in Settings for authoritative breach results."
-                ),
-                confidence=0.35,
-                outcome=FindingOutcome.INCONCLUSIVE,
-                raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
-            ))
+            )]
 
-        return findings
+        reason = (
+            "HIBP could not be queried successfully, so absence of breaches was not verified."
+            if has_api
+            else (
+                "No HIBP API key configured — only limited web search was used. "
+                "Add your key in Settings for authoritative breach results."
+            )
+        )
+        return [Finding(
+            scan_id=scan_id, source=self.id, provider="BreachScanModule",
+            category=FindingCategory.EMAIL, platform="HIBP",
+            title="Breach check inconclusive",
+            description=reason,
+            confidence=0.35,
+            outcome=FindingOutcome.INCONCLUSIVE,
+            raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
+        )]
 
-    async def _hibp_api(self, email: str, scan_id: str) -> list[Finding]:
+    async def _hibp_api(self, email: str, scan_id: str) -> tuple[list[Finding], bool]:
         cache_key = f"hibp:{email}"
         cached = get_cached(cache_key)
         if cached is not None:
-            return [Finding(**f) for f in cached]
+            return [Finding(**f) for f in cached], True
 
         url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{email}"
         headers = {
@@ -78,11 +86,14 @@ class BreachScanModule(NativeModule):
                 resp = await client.get(url, headers=headers, params={"truncateResponse": "false"})
             if resp.status_code == 404:
                 set_cached(cache_key, [])
-                return findings
+                return [], True
             if resp.status_code != 200:
                 logger.warning("HIBP API status %s", resp.status_code)
-                return findings
-            for breach in resp.json():
+                return [], False
+            payload = resp.json()
+            if not isinstance(payload, list):
+                return [], False
+            for breach in payload:
                 findings.append(Finding(
                     scan_id=scan_id, source=self.id, provider="BreachScanModule",
                     category=FindingCategory.EMAIL, platform="HIBP",
@@ -95,9 +106,10 @@ class BreachScanModule(NativeModule):
                     raw={**breach, "outcome": FindingOutcome.CONFIRMED.value},
                 ))
             set_cached(cache_key, [f.model_dump() for f in findings])
+            return findings, True
         except Exception as exc:
             logger.warning("HIBP API error: %s", exc)
-        return findings
+            return [], False
 
     async def _web_fallback(self, email: str, scan_id: str) -> list[Finding]:
         try:
@@ -122,6 +134,8 @@ class BreachScanModule(NativeModule):
                     description=f"Web search only — add HIBP API key for certainty. Query: {query}",
                     snippet=(item.get("body") or "")[:300],
                     confidence=0.55,
+                    outcome=FindingOutcome.CONFIRMED,
+                    raw={"outcome": FindingOutcome.CONFIRMED.value},
                 ))
         except Exception as exc:
             logger.warning("Breach web search failed: %s", exc)
