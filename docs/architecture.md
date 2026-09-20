@@ -63,7 +63,7 @@ Most independent modules are started concurrently. The identity correlator runs 
 - report export;
 - runtime settings.
 
-A local API token protects non-public API routes by default.
+A local API token protects non-public API routes by default. The health endpoint is intentionally public for readiness checks, but it never returns API credentials. The launcher and Electron wrapper generate a fresh per-run token and inject it into the UI; protected requests send the token in the `X-CyberMirror-Token` header.
 
 ### Scan engine
 
@@ -119,7 +119,7 @@ Important files include:
 - `data/cybermirror.sqlite3` — scan and finding history;
 - `data/runtime_settings.json` — UI-configurable runtime settings;
 - `data/secrets.json` — encrypted application secrets;
-- `data/.api_token` — local API authentication token;
+- `data/.api_token` — fallback local API token used when no explicit runtime token is supplied;
 - `data/.encryption_key` — local encryption key;
 - `data/cache/` — temporary network result cache;
 - `data/logs/` — application logs;
@@ -170,7 +170,8 @@ The example environment file documents supported environment overrides without e
 
 CyberMirror applies several local safeguards:
 
-- API token authentication for local API requests;
+- API token authentication for local API requests, with a secret-free public health endpoint;
+- per-run token injection from the launcher/Electron wrapper and header-based authenticated downloads;
 - encrypted profile storage when cryptography support is available;
 - separate encrypted secret storage;
 - Git ignores for runtime secrets and personal scan data;
