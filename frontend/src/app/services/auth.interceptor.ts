@@ -1,13 +1,43 @@
 import { HttpInterceptorFn } from '@angular/common/http';
 
 const TOKEN_KEY = 'cybermirror_api_token';
+let initialized = false;
 
-export function storeApiToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
+function initializeApiToken(): void {
+  if (initialized || typeof window === 'undefined') return;
+  initialized = true;
+
+  const injected = (window as any).cyberMirror?.apiToken;
+  if (typeof injected === 'string' && injected) {
+    storeApiToken(injected);
+    return;
+  }
+
+  const rawHash = window.location.hash.startsWith('#')
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+  const params = new URLSearchParams(rawHash);
+  const token = params.get('api_token');
+  if (!token) return;
+
+  storeApiToken(token);
+  params.delete('api_token');
+
+  const remainingHash = params.toString();
+  const cleanUrl =
+    window.location.pathname +
+    window.location.search +
+    (remainingHash ? `#${remainingHash}` : '');
+  window.history.replaceState(null, document.title, cleanUrl);
+}
+
+export function storeApiToken(token: string): void {
+  sessionStorage.setItem(TOKEN_KEY, token);
 }
 
 export function getApiToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY);
+  initializeApiToken();
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
