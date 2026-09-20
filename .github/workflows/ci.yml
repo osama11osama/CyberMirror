@@ -16,57 +16,118 @@ jobs:
         run: |
           set -euo pipefail
 
-
-          forbidden_files=(
-            ".env"
-            "data/wmn-data.json"
-            "data/runtime_settings.json"
-            "data/secrets.json"
-            "data/.api_token"
-            "data/.encryption_key"
-          )
-
-          for path in "${forbidden_files[@]}"; do
-            if git ls-files --error-unmatch "$path" >/dev/null 2>&1; then
-              echo "Runtime/private file must not be tracked: $path"
-              exit 1
-            fi
-          done
-
-          if git ls-files '*.sqlite3' | grep -q .; then
-            echo "SQLite runtime databases must not be tracked."
-            git ls-files '*.sqlite3'
-            exit 1
-          fi
-
-          # Reject common machine-specific absolute home/drive paths in tracked
-          # UTF-8 text. Keep examples portable and repository-relative.
           python - <<'PY'
           import pathlib
           import re
           import subprocess
           import sys
 
-          files = subprocess.check_output(
-              ["git", "ls-files", "-z"]
-          ).decode().split("\0")
-
-          patterns = [
-              re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\"),
-              re.compile(r"/(?:Users|home)/[^/\s]+/"),
+          files = [
+              name
+              for name in subprocess.check_output(
+                  ["git", "ls-files", "-z"]
+              ).decode().split("\0")
+              if name
           ]
+
+          forbidden_exact = {
+              "data/wmn-data.json",
+              "data/runtime_settings.json",
+              "data/secrets.json",
+              "data/.api_token",
+              "data/.encryption_key",
+              "data/.setup_complete",
+          }
+
+          def is_forbidden_tracked_path(name: str) -> bool:
+              basename = pathlib.PurePosixPath(name).name
+
+              if name in forbidden_exact:
+                  return True
+
+              if basename == ".env":
+                  return True
+              if basename.startswith(".env.") and basename != ".env.example":
+                  return True
+
+              if name.endswith(".sqlite3"):
+                  return True
+
+              if name.startswith(("data/cache/", "data/logs/")):
+                  return True
+
+              if name.startswith("exports/") and name != "exports/.gitkeep":
+                  return True
+
+              return False
+
+          path_cases = {
+              ".env": True,
+              ".env.local": True,
+              "config/.env.production": True,
+              ".env.example": False,
+              "config/.env.example": False,
+              "data/cache/search-result.json": True,
+              "data/logs/app.log": True,
+              "exports/report.json": True,
+              "exports/.gitkeep": False,
+              "data/example.json": False,
+          }
+          for sample, expected in path_cases.items():
+              actual = is_forbidden_tracked_path(sample)
+              if actual != expected:
+                  raise AssertionError(
+                      f"Repository-hygiene path check regression for {sample!r}: "
+                      f"expected {expected}, got {actual}"
+                  )
+
+          forbidden_paths = [name for name in files if is_forbidden_tracked_path(name)]
+          if forbidden_paths:
+              print("Runtime/private files must not be tracked:")
+              print("\n".join(forbidden_paths))
+              sys.exit(1)
+
+          # Reject common machine-specific absolute paths in tracked UTF-8 text,
+          # but do not mistake normal HTTP(S) URL path segments for local paths.
+          machine_path_patterns = [
+              re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\"),
+              re.compile(r"(?<![A-Za-z0-9:/])/(?:Users|home)/[^/\s]+/"),
+          ]
+          web_url_pattern = re.compile(r"https?://[^\s<>()\[\]{}\"']+")
+
+          def contains_machine_path(line: str) -> bool:
+              without_web_urls = web_url_pattern.sub("", line)
+              return any(
+                  pattern.search(without_web_urls)
+                  for pattern in machine_path_patterns
+              )
+
+          content_cases = {
+              r"C:\Users\alice\file.txt": True,
+              r"prefix C:\Users\alice\file.txt": True,
+              "/home/alice/file.txt": True,
+              "path=/home/alice/file.txt": True,
+              "https://example.com/home/alice/profile": False,
+              "See https://example.com/Users/alice/profile": False,
+          }
+          for sample, expected in content_cases.items():
+              actual = contains_machine_path(sample)
+              if actual != expected:
+                  raise AssertionError(
+                      f"Repository-hygiene content check regression for {sample!r}: "
+                      f"expected {expected}, got {actual}"
+                  )
 
           findings = []
           for name in files:
-              if not name:
-                  continue
               path = pathlib.Path(name)
               try:
                   text = path.read_text(encoding="utf-8")
               except (UnicodeDecodeError, OSError):
                   continue
+
               for line_no, line in enumerate(text.splitlines(), 1):
-                  if any(pattern.search(line) for pattern in patterns):
+                  if contains_machine_path(line):
                       findings.append(f"{name}:{line_no}: {line.strip()}")
 
           if findings:
