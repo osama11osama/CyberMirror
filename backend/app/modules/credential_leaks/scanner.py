@@ -5,7 +5,7 @@ import logging
 
 from app.config import settings
 from app.engine.scan_context import raise_if_cancelled
-from app.models.schemas import Finding, FindingCategory, IdentityProfile
+from app.models.schemas import Finding, FindingCategory, FindingOutcome, IdentityProfile
 from app.modules.base import NativeModule
 from app.services.hibp_client import fetch_breaches, fetch_pastes
 from app.services.rate_limiter import throttle
@@ -35,6 +35,8 @@ class CredentialLeaksModule(NativeModule):
                 title="No email provided",
                 description="Add an email address to run credential leak checks.",
                 confidence=0.0,
+                outcome=FindingOutcome.SYSTEM,
+                raw={"outcome": FindingOutcome.SYSTEM.value},
             )]
 
         findings: list[Finding] = []
@@ -58,6 +60,8 @@ class CredentialLeaksModule(NativeModule):
                     "Rotate passwords periodically and enable MFA."
                 ),
                 confidence=0.92,
+                outcome=FindingOutcome.NEGATIVE,
+                raw={"outcome": FindingOutcome.NEGATIVE.value},
             ))
         elif not findings:
             findings.append(Finding(
@@ -69,6 +73,8 @@ class CredentialLeaksModule(NativeModule):
                     "Add your key in Settings for authoritative breach and paste results."
                 ),
                 confidence=0.35,
+                outcome=FindingOutcome.INCONCLUSIVE,
+                raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
             ))
 
         return findings
@@ -91,7 +97,8 @@ class CredentialLeaksModule(NativeModule):
                     + (" · passwords included" if has_passwords else "")
                 ),
                 confidence=0.97,
-                raw={"type": "breach", **breach},
+                outcome=FindingOutcome.CONFIRMED,
+                raw={"type": "breach", "outcome": FindingOutcome.CONFIRMED.value, **breach},
             ))
         return findings
 
@@ -114,7 +121,8 @@ class CredentialLeaksModule(NativeModule):
                     f"Emails in paste: {paste.get('EmailCount', '?')}"
                 ),
                 confidence=0.94,
-                raw={"type": "paste", **paste},
+                outcome=FindingOutcome.CONFIRMED,
+                raw={"type": "paste", "outcome": FindingOutcome.CONFIRMED.value, **paste},
             ))
         return findings
 

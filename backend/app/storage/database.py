@@ -135,7 +135,7 @@ def save_findings(findings: list[Finding]) -> None:
                     f.risk_reason,
                     f.recommendation,
                     f.timestamp.isoformat(),
-                    json.dumps(f.raw),
+                    json.dumps({**(f.raw or {}), "outcome": f.outcome.value}),
                 )
                 for f in findings
             ],
@@ -199,7 +199,16 @@ def _row_to_summary(row: sqlite3.Row) -> ScanSummary:
 
 
 def row_to_finding(row: dict) -> Finding:
-    from app.models.schemas import FindingCategory, RiskLevel
+    from app.models.schemas import FindingCategory, FindingOutcome, RiskLevel
+
+    raw = json.loads(row["raw_json"] or "{}")
+    outcome = FindingOutcome.UNKNOWN
+    raw_outcome = raw.get("outcome")
+    if isinstance(raw_outcome, str):
+        try:
+            outcome = FindingOutcome(raw_outcome)
+        except ValueError:
+            outcome = FindingOutcome.UNKNOWN
 
     return Finding(
         id=row["id"],
@@ -216,8 +225,9 @@ def row_to_finding(row: dict) -> Finding:
         risk_level=RiskLevel(row["risk_level"]),
         risk_reason=row["risk_reason"] or "",
         recommendation=row["recommendation"] or "",
+        outcome=outcome,
         timestamp=datetime.fromisoformat(row["timestamp"]),
-        raw=json.loads(row["raw_json"] or "{}"),
+        raw=raw,
     )
 
 

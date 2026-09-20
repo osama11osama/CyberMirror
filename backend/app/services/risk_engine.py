@@ -1,6 +1,6 @@
 """Risk scoring engine."""
 
-from app.models.schemas import Finding, IdentityProfile, RiskLevel
+from app.models.schemas import Finding, FindingOutcome, IdentityProfile, RiskLevel
 
 RISK_WEIGHTS = {
     RiskLevel.CRITICAL: 100,
@@ -16,13 +16,64 @@ SOCIAL_DOMAINS = (
     "twitter.com", "x.com", "tiktok.com", "reddit.com",
 )
 
+_NEGATIVE_TITLE_MARKERS = (
+    "no known breaches",
+    "no credential leaks found",
+    "no breaches found",
+)
+_INCONCLUSIVE_TITLE_MARKERS = (
+    "inconclusive",
+)
+_SYSTEM_TITLE_MARKERS = (
+    "no email provided",
+)
+
 
 def _contains(text: str, needle: str) -> bool:
     return bool(needle and needle.lower() in text.lower())
 
 
+def _resolve_outcome(finding: Finding) -> FindingOutcome:
+    if finding.outcome and finding.outcome != FindingOutcome.UNKNOWN:
+        return finding.outcome
+    raw_outcome = (finding.raw or {}).get("outcome")
+    if isinstance(raw_outcome, str):
+        try:
+            return FindingOutcome(raw_outcome)
+        except ValueError:
+            pass
+    title = (finding.title or "").lower()
+    if any(m in title for m in _SYSTEM_TITLE_MARKERS):
+        return FindingOutcome.SYSTEM
+    if any(m in title for m in _NEGATIVE_TITLE_MARKERS):
+        return FindingOutcome.NEGATIVE
+    if any(m in title for m in _INCONCLUSIVE_TITLE_MARKERS):
+        return FindingOutcome.INCONCLUSIVE
+    return FindingOutcome.UNKNOWN
+
+
 def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
     combined = f"{finding.title} {finding.description} {finding.snippet} {finding.url}"
+    outcome = _resolve_outcome(finding)
+    finding.outcome = outcome
+
+    if outcome == FindingOutcome.SYSTEM:
+        finding.risk_level = RiskLevel.INFO
+        finding.risk_reason = "System or status message — not public exposure"
+        finding.recommendation = "Provide the missing input if you want this check to run"
+        return finding
+
+    if outcome == FindingOutcome.NEGATIVE:
+        finding.risk_level = RiskLevel.INFO
+        finding.risk_reason = "No confirmed exposure found for this check"
+        finding.recommendation = "Keep rotating passwords periodically and enable MFA"
+        return finding
+
+    if outcome == FindingOutcome.INCONCLUSIVE:
+        finding.risk_level = RiskLevel.LOW
+        finding.risk_reason = "Check was inconclusive — not confirmed exposure"
+        finding.recommendation = "Add an API key or re-run with more complete inputs for certainty"
+        return finding
 
     has_name = _contains(combined, profile.full_name)
     has_email = _contains(combined, profile.email)
@@ -30,6 +81,10 @@ def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
     has_username = _contains(combined, profile.username)
     has_location = _contains(combined, profile.location)
     is_social = any(d in finding.url.lower() for d in SOCIAL_DOMAINS)
+    is_registration = (
+        finding.source == "email_scan"
+        and "registered on" in (finding.title or "").lower()
+    )
 
     if has_phone and has_name and has_location:
         finding.risk_level = RiskLevel.CRITICAL
@@ -44,6 +99,7 @@ def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
         finding.risk_reason = "Phone number and name exposed together"
         finding.recommendation = "Remove phone from public profiles and directories"
     elif finding.platform.startswith("HIBP") or finding.source == "credential_leaks":
+        finding.outcome = FindingOutcome.CONFIRMED
         finding.risk_level = RiskLevel.CRITICAL if "password" in combined.lower() else RiskLevel.HIGH
         finding.risk_reason = "Credential or breach exposure detected"
         finding.recommendation = "Change passwords immediately; enable MFA; check for unauthorized account access"
@@ -55,7 +111,13 @@ def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
         finding.risk_level = RiskLevel.MEDIUM
         finding.risk_reason = "Possible Tor index mention (lower confidence)"
         finding.recommendation = "Review manually — may be a generic or unrelated index hit"
+    elif is_registration:
+        finding.outcome = FindingOutcome.CONFIRMED
+        finding.risk_level = RiskLevel.MEDIUM
+        finding.risk_reason = "Registration signal — email may be enrolled on a public service"
+        finding.recommendation = "Review account privacy; delete unused registrations"
     elif finding.category.value == "email_exposure":
+        finding.outcome = FindingOutcome.CONFIRMED
         finding.risk_level = RiskLevel.HIGH
         finding.risk_reason = "Email registered on a public-facing service"
         finding.recommendation = "Review account privacy; delete unused registrations"

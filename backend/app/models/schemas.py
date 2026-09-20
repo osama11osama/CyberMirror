@@ -26,6 +26,16 @@ class FindingCategory(str, Enum):
     OTHER = "other"
 
 
+class FindingOutcome(str, Enum):
+    """Semantic result type — risk must not treat all email findings as exposure."""
+
+    CONFIRMED = "confirmed_exposure"
+    NEGATIVE = "negative"
+    INCONCLUSIVE = "inconclusive"
+    SYSTEM = "system"
+    UNKNOWN = "unknown"
+
+
 class IdentityProfile(BaseModel):
     full_name: str = ""
     username: str = ""
@@ -64,6 +74,7 @@ class Finding(BaseModel):
     risk_level: RiskLevel = RiskLevel.UNKNOWN
     risk_reason: str = ""
     recommendation: str = ""
+    outcome: FindingOutcome = FindingOutcome.UNKNOWN
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     raw: dict[str, Any] = Field(default_factory=dict)
 

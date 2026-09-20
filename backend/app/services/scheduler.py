@@ -7,8 +7,7 @@ from datetime import datetime, timedelta
 from app.config import settings
 from app.engine.scan_engine import ScanEngine
 from app.models.schemas import IdentityProfile
-from app.modules.registry import DEFAULT_MODULES
-from app.services.runtime_settings import load_runtime
+from app.services.runtime_settings import get_enabled_modules, load_runtime
 from app.storage.database import list_scans
 
 logger = logging.getLogger(__name__)
@@ -16,6 +15,11 @@ logger = logging.getLogger(__name__)
 _engine = ScanEngine()
 _task: asyncio.Task | None = None
 _last_run: datetime | None = None
+
+
+def modules_for_scheduled_scan() -> list[str]:
+    """Same module-selection policy as manual scans."""
+    return get_enabled_modules()
 
 
 async def _scheduler_loop() -> None:
@@ -34,9 +38,14 @@ async def _scheduler_loop() -> None:
         profile = scans[0].profile
         if not (profile.username or profile.email or profile.full_name):
             continue
-        logger.info("Scheduled scan starting for %s", profile.username or profile.full_name)
+        modules = modules_for_scheduled_scan()
+        logger.info(
+            "Scheduled scan starting for %s with modules=%s",
+            profile.username or profile.full_name,
+            modules,
+        )
         try:
-            await _engine.run_scan(profile, DEFAULT_MODULES)
+            await _engine.run_scan(profile, modules)
             _last_run = datetime.utcnow()
             logger.info("Scheduled scan completed")
         except Exception as exc:

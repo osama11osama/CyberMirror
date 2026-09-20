@@ -70,6 +70,7 @@ import { ApiService } from '../../services/api.service';
           <input type="checkbox" [(ngModel)]="cfg.schedule_enabled" />
           Enable scheduled scans
         </label>
+        <p class="hint">Scheduled scans use the same Enabled modules list as manual scans.</p>
         <div class="form-field">
           <label>Interval (hours)</label>
           <input type="number" [(ngModel)]="cfg.schedule_interval_hours" min="24" />
@@ -85,6 +86,7 @@ import { ApiService } from '../../services/api.service';
     .form-field input, .form-field select { width: 100%; padding: 0.5rem; background: var(--cm-surface-2); border: 1px solid var(--cm-border); border-radius: 6px; color: var(--cm-text); }
     .check-row, .module-row { display: flex; gap: 0.75rem; align-items: flex-start; margin: 0.75rem 0; color: var(--cm-text); }
     .module-row small { display: block; color: var(--cm-muted); margin-top: 4px; }
+    .hint { color: var(--cm-muted); font-size: 0.85rem; margin: 0.25rem 0 0.75rem; }
     .success { color: var(--cm-low); margin-top: 0.75rem; }
     .error { color: var(--cm-critical); }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }

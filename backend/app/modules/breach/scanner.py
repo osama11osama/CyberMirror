@@ -6,7 +6,7 @@ import logging
 import httpx
 
 from app.config import settings
-from app.models.schemas import Finding, FindingCategory, IdentityProfile
+from app.models.schemas import Finding, FindingCategory, FindingOutcome, IdentityProfile
 from app.modules.base import NativeModule
 from app.services.cache import get_cached, set_cached
 from app.services.rate_limiter import throttle
@@ -41,6 +41,8 @@ class BreachScanModule(NativeModule):
                 title=f"No known breaches for {email}",
                 description="HIBP API returned no breaches for this email.",
                 confidence=0.92,
+                outcome=FindingOutcome.NEGATIVE,
+                raw={"outcome": FindingOutcome.NEGATIVE.value},
             ))
         elif not findings:
             findings.append(Finding(
@@ -52,6 +54,8 @@ class BreachScanModule(NativeModule):
                     "Add your key in Settings for authoritative breach results."
                 ),
                 confidence=0.35,
+                outcome=FindingOutcome.INCONCLUSIVE,
+                raw={"outcome": FindingOutcome.INCONCLUSIVE.value},
             ))
 
         return findings
@@ -87,7 +91,8 @@ class BreachScanModule(NativeModule):
                     description=breach.get("Description", "")[:400],
                     snippet=f"Date: {breach.get('BreachDate', '?')} · {breach.get('DataClasses', [])}",
                     confidence=0.95,
-                    raw=breach,
+                    outcome=FindingOutcome.CONFIRMED,
+                    raw={**breach, "outcome": FindingOutcome.CONFIRMED.value},
                 ))
             set_cached(cache_key, [f.model_dump() for f in findings])
         except Exception as exc:
