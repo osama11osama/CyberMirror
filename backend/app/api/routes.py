@@ -49,8 +49,6 @@ from app.services.logging_setup import setup_logging
 
 from app.services.report_exporter import export_csv, export_html, export_json, export_pdf
 
-from app.services.auth import get_or_create_token
-
 from app.services.cache import clear_cache
 
 from app.services.runtime_settings import apply_runtime, get_enabled_modules, load_runtime, save_runtime
@@ -122,7 +120,7 @@ def health():
 
         "wmn": wmn_status(),
 
-        "api_token": get_or_create_token() if settings.api_auth_enabled else None,
+        "api_auth_enabled": settings.api_auth_enabled,
 
         "encryption_enabled": settings.encryption_enabled,
 
