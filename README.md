@@ -199,6 +199,6 @@ Public information can still be personal data. Users are responsible for complyi
 
 ## License
 
-CyberMirror-authored source code is copyright © 2026 Osama Altamar. All rights reserved unless a file explicitly states otherwise.
+CyberMirror-authored source code is copyright © 2026 osama11osama. All rights reserved unless a file explicitly states otherwise.
 
 Third-party data and dependencies are governed by their respective licenses. In particular, the username catalog attribution is documented separately.
