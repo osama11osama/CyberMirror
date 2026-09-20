@@ -16,7 +16,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          tracked="$(git ls-files)"
 
           forbidden_files=(
             ".env"
@@ -53,7 +52,7 @@ jobs:
           ).decode().split("\0")
 
           patterns = [
-              re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\\\"),
+              re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\"),
               re.compile(r"/(?:Users|home)/[^/\s]+/"),
           ]
 
