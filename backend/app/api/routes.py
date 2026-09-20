@@ -428,7 +428,7 @@ def scan_graph(scan_id: str):
 
         raise HTTPException(404, "Scan not found")
 
-    profile = IdentityProfile.model_validate_json(data["scan"]["profile_json"])
+    profile = profile_from_row(data["scan"])
 
     findings = [row_to_finding(f) for f in data["findings"]]
 
