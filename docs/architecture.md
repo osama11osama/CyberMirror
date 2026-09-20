@@ -129,6 +129,8 @@ These paths are excluded from version control.
 
 Sensitive profile JSON stored in SQLite is encrypted when encryption is enabled. This protects local-at-rest data from casual inspection, but it is not a substitute for operating-system access controls or full-disk encryption.
 
+When `encryption_enabled` is true, CyberMirror **fails closed**: if a key cannot be created/loaded or encryption raises an error, sensitive profile/secret writes are rejected instead of silently falling back to plaintext. Set `encryption_enabled=false` only when you intentionally want unencrypted local storage (for example, constrained local debugging).
+
 ## Network boundary
 
 CyberMirror is local-first, not offline-only. A scan can make outbound requests containing the identifier being checked.

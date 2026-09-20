@@ -14,27 +14,64 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
             node_ids.add(nid)
         return nid
 
-    person_id = add_node("person", profile.full_name or "Subject", "Person")
+    # Seed / investigator-supplied attributes (search inputs — not public evidence).
+    person_id = add_node(
+        "person",
+        profile.full_name or "Subject",
+        "Person",
+        role="seed",
+        origin="investigator_input",
+    )
 
     if profile.email:
-        eid = add_node(f"email:{profile.email}", profile.email, "Email")
-        edges.append(GraphEdge(id=f"e-{person_id}-{eid}", source=person_id, target=eid, label="has email"))
+        eid = add_node(
+            f"email:{profile.email}", profile.email, "Email",
+            role="seed", origin="investigator_input",
+        )
+        edges.append(GraphEdge(
+            id=f"e-{person_id}-{eid}", source=person_id, target=eid,
+            label="search input",
+        ))
 
     if profile.username:
-        uid = add_node(f"user:{profile.username}", profile.username, "Username")
-        edges.append(GraphEdge(id=f"e-{person_id}-{uid}", source=person_id, target=uid, label="has username"))
+        uid = add_node(
+            f"user:{profile.username}", profile.username, "Username",
+            role="seed", origin="investigator_input",
+        )
+        edges.append(GraphEdge(
+            id=f"e-{person_id}-{uid}", source=person_id, target=uid,
+            label="search input",
+        ))
 
     if profile.phone:
-        pid = add_node(f"phone:{profile.phone}", profile.phone, "Phone")
-        edges.append(GraphEdge(id=f"e-{person_id}-{pid}", source=person_id, target=pid, label="has phone"))
+        pid = add_node(
+            f"phone:{profile.phone}", profile.phone, "Phone",
+            role="seed", origin="investigator_input",
+        )
+        edges.append(GraphEdge(
+            id=f"e-{person_id}-{pid}", source=person_id, target=pid,
+            label="search input",
+        ))
 
     if profile.website:
-        wid = add_node(f"web:{profile.website}", profile.website, "Website")
-        edges.append(GraphEdge(id=f"e-{person_id}-{wid}", source=person_id, target=wid, label="has website"))
+        wid = add_node(
+            f"web:{profile.website}", profile.website, "Website",
+            role="seed", origin="investigator_input",
+        )
+        edges.append(GraphEdge(
+            id=f"e-{person_id}-{wid}", source=person_id, target=wid,
+            label="search input",
+        ))
 
     if profile.location:
-        lid = add_node(f"loc:{profile.location}", profile.location, "Location")
-        edges.append(GraphEdge(id=f"e-{person_id}-{lid}", source=person_id, target=lid, label="located in"))
+        lid = add_node(
+            f"loc:{profile.location}", profile.location, "Location",
+            role="seed", origin="investigator_input",
+        )
+        edges.append(GraphEdge(
+            id=f"e-{person_id}-{lid}", source=person_id, target=lid,
+            label="search input",
+        ))
 
     for i, f in enumerate(findings):
         if not f.url and not f.platform:
@@ -43,6 +80,8 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
             f"finding:{i}",
             f.platform or f.title[:30],
             "PublicProfile" if f.category.value in ("username_discovery", "social_discovery") else "Finding",
+            role="discovered",
+            origin="observed_evidence",
             risk=f.risk_level.value,
             url=f.url,
             title=f.title,
@@ -51,6 +90,7 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
             source=f.source,
             platform=f.platform,
             category=f.category.value,
+            outcome=getattr(f.outcome, "value", None),
         )
         parent = person_id
         if profile.username and f.category.value == "username_discovery":
@@ -58,6 +98,8 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
         elif profile.email and f.category.value == "email_exposure":
             parent = f"email:{profile.email}"
         if parent in node_ids:
-            edges.append(GraphEdge(id=f"ef-{i}", source=parent, target=fid, label=f.source))
+            edges.append(GraphEdge(
+                id=f"ef-{i}", source=parent, target=fid, label=f.source or "observed",
+            ))
 
     return GraphData(nodes=nodes, edges=edges)

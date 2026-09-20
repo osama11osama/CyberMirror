@@ -28,6 +28,12 @@ _INCONCLUSIVE_TITLE_MARKERS = (
 _SYSTEM_TITLE_MARKERS = (
     "no email provided",
 )
+# Legacy correlator titles created from investigator inputs alone (pre-evidence model).
+_LEGACY_SEED_CORRELATION_TITLES = (
+    "name + username linked",
+    "email + real name exposed",
+    "phone + location exposed",
+)
 
 
 def _contains(text: str, needle: str) -> bool:
@@ -50,6 +56,13 @@ def _resolve_outcome(finding: Finding) -> FindingOutcome:
         return FindingOutcome.NEGATIVE
     if any(m in title for m in _INCONCLUSIVE_TITLE_MARKERS):
         return FindingOutcome.INCONCLUSIVE
+    # Historical correlator rows that claimed exposure from seed fields only.
+    if (
+        finding.source == "identity_correlator"
+        and not (finding.raw or {}).get("evidence_backed")
+        and any(title == m or title.startswith(m) for m in _LEGACY_SEED_CORRELATION_TITLES)
+    ):
+        return FindingOutcome.SYSTEM
     return FindingOutcome.UNKNOWN
 
 
