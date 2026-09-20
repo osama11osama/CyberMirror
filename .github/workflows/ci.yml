@@ -91,6 +91,8 @@ jobs:
           # but do not mistake normal HTTP(S) URL path segments for local paths.
           machine_path_patterns = [
               re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:\\"),
+              # Windows drive paths written with forward slashes.
+              re.compile(r"(?<![A-Za-z0-9])[A-Za-z]:/(?:Users|home)/[^/\s]+/"),
               re.compile(r"(?<![A-Za-z0-9:/])/(?:Users|home)/[^/\s]+/"),
           ]
           web_url_pattern = re.compile(r"https?://[^\s<>()\[\]{}\"']+")
@@ -106,14 +108,18 @@ jobs:
               "C:" + chr(92) + "Users" + chr(92) + "alice"
               + chr(92) + "file.txt"
           )
+          windows_forward_slash_path = "C:" + "/" + "Users/alice/file.txt"
           posix_home_path = "/" + "home/alice/file.txt"
           content_cases = {
               windows_path: True,
               "prefix " + windows_path: True,
+              windows_forward_slash_path: True,
+              "path=" + windows_forward_slash_path: True,
               posix_home_path: True,
               "path=" + posix_home_path: True,
               "https://example.com/home/alice/profile": False,
               "See https://example.com/Users/alice/profile": False,
+              "https://cdn.example.com/" + windows_forward_slash_path: False,
           }
           for sample, expected in content_cases.items():
               actual = contains_machine_path(sample)
