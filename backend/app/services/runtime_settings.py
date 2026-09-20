@@ -9,7 +9,8 @@ RUNTIME_FILE = PROJECT_ROOT / "data" / "runtime_settings.json"
 
 _ALL_MODULES = [
     "web_search", "username_scan", "social_browser", "email_scan",
-    "phone_scan", "breach_scan", "domain_scan", "identity_correlator",
+    "phone_scan", "breach_scan", "credential_leaks", "ahmia_search",
+    "domain_scan", "identity_correlator",
 ]
 
 DEFAULTS = {
@@ -21,6 +22,8 @@ DEFAULTS = {
     "schedule_enabled": False,
     "schedule_interval_hours": 168,
     "cache_ttl_seconds": 3600,
+    "ahmia_max_results": 10,
+    "ahmia_max_queries": 3,
     "enabled_modules": list(_ALL_MODULES),
     "locale": "en",
 }
@@ -33,6 +36,11 @@ def load_runtime() -> dict:
         data = json.loads(RUNTIME_FILE.read_text(encoding="utf-8"))
         merged = dict(DEFAULTS)
         merged.update(data)
+        saved_mods = list(merged.get("enabled_modules") or [])
+        for mid in _ALL_MODULES:
+            if mid not in saved_mods:
+                saved_mods.append(mid)
+        merged["enabled_modules"] = saved_mods
         if "hibp_api_key" in data and data["hibp_api_key"]:
             migrate_plaintext_hibp(data["hibp_api_key"])
             merged.pop("hibp_api_key", None)
@@ -70,6 +78,8 @@ def apply_runtime(data: dict | None = None) -> None:
     settings.hibp_api_key = get_secret("hibp_api_key")
     settings.schedule_enabled = bool(data.get("schedule_enabled", False))
     settings.schedule_interval_hours = int(data.get("schedule_interval_hours", 168))
+    settings.ahmia_max_results = int(data.get("ahmia_max_results", 10))
+    settings.ahmia_max_queries = int(data.get("ahmia_max_queries", 3))
     wmn = data.get("wmn_data_path")
     if wmn:
         settings.wmn_data_path = resolve_project_path(wmn)

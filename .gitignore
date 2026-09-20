@@ -1,4 +1,5 @@
 # CyberMirror
+.idea/
 .env
 .env.*
 !.env.example

@@ -20,6 +20,10 @@ def _make_client() -> TestClient:
     def private():
         return {"status": "protected"}
 
+    @app.options("/api/private")
+    def private_options():
+        return {"status": "ok"}
+
     return TestClient(app)
 
 
@@ -68,6 +72,15 @@ def test_auth_can_be_explicitly_disabled(monkeypatch):
     monkeypatch.setattr(settings, "api_auth_enabled", False)
 
     response = _make_client().get("/api/private")
+
+    assert response.status_code == 200
+
+
+def test_options_preflight_bypasses_auth(monkeypatch):
+    monkeypatch.setattr(settings, "api_auth_enabled", True)
+    monkeypatch.setattr(settings, "api_token", "test-token")
+
+    response = _make_client().options("/api/private")
 
     assert response.status_code == 200
 

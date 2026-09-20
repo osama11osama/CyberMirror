@@ -54,7 +54,20 @@ def logs_dir() -> Path:
 
 
 def log(msg: str) -> None:
-    print(f"[CyberMirror] {msg}", flush=True)
+    safe = msg.encode("ascii", errors="replace").decode()
+    print(f"[CyberMirror] {safe}", flush=True)
+
+
+def _configure_console() -> None:
+    if sys.platform != "win32":
+        return
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ.setdefault("PYTHONUTF8", "1")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def load_pids() -> dict:
@@ -109,7 +122,7 @@ def kill_port(port: int) -> None:
 
 
 def stop_all() -> None:
-    log("Stopping CyberMirror…")
+    log("Stopping CyberMirror...")
     for key in ("backend", "frontend", "launcher"):
         pid = load_pids().get(key)
         if pid:
@@ -155,7 +168,7 @@ def wait_for_service(
     hint_idx = 0
     last_hint_at = 0
 
-    log(f"Waiting for {label} (timeout {_format_elapsed(int(timeout))})…")
+    log(f"Waiting for {label} (timeout {_format_elapsed(int(timeout))})...")
     if hints:
         log(f"  Tip: {hints[0]}")
 
@@ -170,7 +183,7 @@ def wait_for_service(
 
         if _url_ok(url):
             print()
-            log(f"{label} ready in {_format_elapsed(elapsed)} ✓")
+            log(f"{label} ready in {_format_elapsed(elapsed)} OK")
             return True
 
         ratio = elapsed / timeout
@@ -182,7 +195,7 @@ def wait_for_service(
         if hints and elapsed - last_hint_at >= 20:
             hint_idx = (hint_idx + 1) % len(hints)
             print()
-            log(f"  Still working… {hints[hint_idx]}")
+            log(f"  Still working... {hints[hint_idx]}")
             last_hint_at = elapsed
 
         time.sleep(2)
@@ -221,7 +234,7 @@ def spawn_logged(
     env_overrides: dict[str, str] | None = None,
 ) -> subprocess.Popen:
     log_path = logs_dir() / f"{name}.log"
-    log(f"Starting {name}… (log: {log_path.name})")
+    log(f"Starting {name}... (log: {log_path.name})")
 
     env = os.environ.copy()
     env["PYTHONUNBUFFERED"] = "1"
@@ -261,7 +274,7 @@ def resolve_frontend_dist(frontend_dir: Path) -> Path | None:
 def spawn_build(cmd: list[str], cwd: Path, name: str) -> int:
     """Run a blocking command with live output."""
     log_path = logs_dir() / f"{name}.log"
-    log(f"Running {name}… (log: {log_path.name})")
+    log(f"Running {name}... (log: {log_path.name})")
     with open(log_path, "w", encoding="utf-8", errors="replace") as f:
         proc = subprocess.Popen(
             cmd,
@@ -338,17 +351,17 @@ def auto_setup(root: Path, python: str, npm: str) -> None:
     marker = root / "data" / ".setup_complete"
 
     if not marker.exists():
-        log("First run — installing dependencies (one-time)…")
+        log("First run - installing dependencies (one-time)...")
 
         req = backend / "requirements.txt"
         if req.exists():
-            log("  pip install -r requirements.txt …")
+            log("  pip install -r requirements.txt ...")
             subprocess.run(
                 [python, "-m", "pip", "install", "-r", str(req)],
                 cwd=str(backend),
                 creationflags=CREATE_NO_WINDOW if sys.platform == "win32" else 0,
             )
-            log("  playwright install chromium …")
+            log("  playwright install chromium ...")
             subprocess.run(
                 [python, "-m", "playwright", "install", "chromium"],
                 cwd=str(backend),
@@ -356,7 +369,7 @@ def auto_setup(root: Path, python: str, npm: str) -> None:
             )
 
         if (frontend / "package.json").exists() and not (frontend / "node_modules").exists():
-            log("  npm install …")
+            log("  npm install ...")
             subprocess.run(
                 [npm, "install"],
                 cwd=str(frontend),
@@ -366,9 +379,9 @@ def auto_setup(root: Path, python: str, npm: str) -> None:
 
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("ok", encoding="utf-8")
-        log("Setup complete ✓")
+        log("Setup complete.")
     elif not (frontend / "node_modules").exists():
-        log("node_modules missing — running npm install …")
+        log("node_modules missing - running npm install ...")
         subprocess.run(
             [npm, "install"],
             cwd=str(frontend),
@@ -417,6 +430,7 @@ def start_tray(on_stop, on_open) -> None:
 
 
 def main() -> int:
+    _configure_console()
     parser = argparse.ArgumentParser(description="CyberMirror Launcher")
     parser.add_argument("--prod", action="store_true", default=True, help="Production mode (default)")
     parser.add_argument("--dev", action="store_true", help="Dev mode — ng serve (slow first compile)")
@@ -431,7 +445,7 @@ def main() -> int:
     for i in issues:
         log(f"WARNING: {i}")
     if any("missing" in i.lower() or "not found" in i.lower() for i in issues):
-        input("Press Enter to exit…")
+        input("Press Enter to exit...")
         return 1
 
     python = find_python()
@@ -457,44 +471,44 @@ def main() -> int:
     if not wait_for_service(BACKEND_HEALTH, BACKEND_TIMEOUT, "Backend", _procs["backend"]):
         tail_log_errors("backend")
         stop_all()
-        input("Press Enter to exit…")
+        input("Press Enter to exit...")
         return 1
 
     # --- Frontend ---
     if use_prod:
         dist = resolve_frontend_dist(frontend_dir)
         if dist is None:
-            log("No production build found — building Angular (one-time, ~2-5 min)…")
+            log("No production build found - building Angular (one-time, ~2-5 min)...")
             code = spawn_build([npm, "run", "build"], frontend_dir, "frontend_build")
             dist = resolve_frontend_dist(frontend_dir)
             if dist is None:
                 log(f"ERROR: Frontend build failed (npm exit code {code})")
                 tail_log_errors("frontend_build")
                 stop_all()
-                input("Press Enter to exit…")
+                input("Press Enter to exit...")
                 return 1
             if code != 0:
-                log(f"Build finished with warnings (exit {code}) — output found, continuing.")
-        log(f"Serving production frontend from {dist.name}/…")
+                log(f"Build finished with warnings (exit {code}) - output found, continuing.")
+        log(f"Serving production frontend from {dist.name}/...")
         _procs["frontend"] = spawn_logged(
             [python, "-m", "http.server", str(FRONTEND_PORT), "--directory", str(dist)],
             frontend_dir,
             "frontend",
         )
         fe_timeout = 60
-        fe_hints = ["Static files — should be quick"]
+        fe_hints = ["Static files - should be quick"]
     else:
         log("")
-        log("Starting Angular dev server (ng serve)…")
-        log("  ⏳ First compile often takes 3-10 minutes — progress bar below is normal.")
-        log("  💡 Next time use: CyberMirror.exe --prod  (much faster)")
+        log("Starting Angular dev server (ng serve)...")
+        log("  First compile often takes 3-10 minutes - progress bar below is normal.")
+        log("  Tip: next time use production mode (CyberMirror.bat) for faster startup.")
         log("")
         _procs["frontend"] = spawn_logged([npm, "run", "start"], frontend_dir, "frontend")
         fe_timeout = FRONTEND_DEV_TIMEOUT
         fe_hints = [
-            "Angular is compiling TypeScript — first run is slow",
+            "Angular is compiling TypeScript - first run is slow",
             "Watch for [frontend] Compiled successfully in the log above",
-            "Still compiling… large projects need several minutes",
+            "Still compiling... large projects need several minutes",
             "If this is your first run, npm install may still be caching",
             "Port 4200 opens only after compile finishes",
         ]
@@ -507,7 +521,7 @@ def main() -> int:
         log("  2. Try production mode: CyberMirror.exe --prod")
         log("  3. Or manually: cd frontend && npm start")
         stop_all()
-        input("Press Enter to exit…")
+        input("Press Enter to exit...")
         return 1
 
     save_pids({
@@ -519,8 +533,8 @@ def main() -> int:
     webbrowser.open(launch_url)
     log("")
     log("=" * 50)
-    log(f"  CyberMirror is running → {FRONTEND_URL}")
-    log(f"  Backend API          → http://127.0.0.1:{BACKEND_PORT}")
+    log(f"  CyberMirror is running -> {FRONTEND_URL}")
+    log(f"  Backend API          -> http://127.0.0.1:{BACKEND_PORT}")
     log("  Keep this window open. Ctrl+C or tray icon to stop.")
     log("=" * 50)
 
@@ -533,11 +547,11 @@ def main() -> int:
                     log(f"ERROR: {name} stopped unexpectedly (code {proc.returncode})")
                     tail_log_errors(name)
                     stop_all()
-                    input("Press Enter to exit…")
+                    input("Press Enter to exit...")
                     return 1
             time.sleep(2)
     except KeyboardInterrupt:
-        log("Shutting down…")
+        log("Shutting down...")
         stop_all()
     return 0
 

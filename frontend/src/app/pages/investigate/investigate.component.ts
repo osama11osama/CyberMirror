@@ -13,7 +13,6 @@ import { MatProgressBarModule } from '@angular/material/progress-bar';
 import { Subscription, interval, switchMap } from 'rxjs';
 
 import { ApiService, IdentityProfile, ScanStatus } from '../../services/api.service';
-import { I18nService } from '../../services/i18n.service';
 
 const PROFILE_KEY = 'cybermirror_profile';
 
@@ -23,7 +22,7 @@ const DEFAULT_SELECTED = [
 
   'web_search', 'username_scan', 'social_browser', 'email_scan',
 
-  'phone_scan', 'breach_scan', 'domain_scan', 'identity_correlator',
+  'phone_scan', 'credential_leaks', 'ahmia_search', 'domain_scan', 'identity_correlator',
 
 ];
 
@@ -73,7 +72,7 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
 
       <h1>Investigation Workspace</h1>
 
-      <p class="subtitle">Full internet scan — 600+ sites, browser checks, breaches, phone</p>
+      <p class="subtitle">Full scan — 600+ sites, credential leaks, Ahmia Tor index, browser checks</p>
 
     </div>
 
@@ -83,7 +82,7 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
 
       <mat-icon>cloud_off</mat-icon>
 
-      <div><strong>Backend not connected</strong><p>Run CyberMirror.exe or <code>python main.py</code></p></div>
+      <div><strong>Backend not connected</strong><p>Run <code>CyberMirror.bat</code> and keep the window open</p></div>
 
     </div>
 
@@ -149,19 +148,19 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
 
           <div class="module-errors" *ngIf="moduleErrors.length">
 
-            <strong>{{ i18n.t('module_errors') }}:</strong>
+            <strong>Module errors:</strong>
 
             <ul><li *ngFor="let e of moduleErrors">{{ e.module }} — {{ e.error }}</li></ul>
 
           </div>
 
-          <button class="btn-secondary cancel-btn" (click)="cancelScan()">{{ i18n.t('cancel_scan') }}</button>
+          <button class="btn-secondary cancel-btn" (click)="cancelScan()">Cancel scan</button>
 
         </div>
 
 
 
-        <button class="btn-secondary full-width" style="margin-top:0.5rem" (click)="saveProfile()">{{ i18n.t('save_profile') }}</button>
+        <button class="btn-secondary full-width" style="margin-top:0.5rem" (click)="saveProfile()">Save profile</button>
 
 
 
@@ -231,7 +230,7 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
 
           <h3>Ready to scan</h3>
 
-          <p>600+ platforms · Playwright browser · web search · breaches · phone · WHOIS</p>
+          <p>600+ platforms · credential leaks · Ahmia Tor · Playwright · web search · phone · WHOIS</p>
 
         </div>
 
@@ -402,7 +401,7 @@ export class InvestigateComponent implements OnInit, OnDestroy {
 
 
 
-  constructor(private api: ApiService, public i18n: I18nService) {}
+  constructor(private api: ApiService) {}
 
 
 

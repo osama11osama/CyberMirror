@@ -17,3 +17,21 @@ def test_phone_exposure_high_risk():
 
 def test_risk_score_empty():
     assert compute_risk_score([]) == 0.0
+
+
+def test_credential_leak_is_high_or_critical():
+    f = Finding(
+        source="credential_leaks", platform="HIBP", title="Email in breach",
+        category=FindingCategory.EMAIL, snippet="password hash exposed",
+    )
+    analyze_finding(f, IdentityProfile(email="jane@example.com"))
+    assert f.risk_level in (RiskLevel.HIGH, RiskLevel.CRITICAL)
+
+
+def test_ahmia_high_confidence_is_high_risk():
+    f = Finding(
+        source="ahmia_search", platform="Ahmia", title="Onion mention",
+        category=FindingCategory.ADVANCED, confidence=0.8,
+    )
+    analyze_finding(f, IdentityProfile(username="jane"))
+    assert f.risk_level == RiskLevel.HIGH

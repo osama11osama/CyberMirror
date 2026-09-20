@@ -53,6 +53,8 @@ class Settings(BaseSettings):
 
     schedule_enabled: bool = False
     schedule_interval_hours: int = 168
+    ahmia_max_results: int = 10
+    ahmia_max_queries: int = 3
 
     @field_validator("wmn_data_path", mode="before")
     @classmethod

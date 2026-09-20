@@ -2,7 +2,12 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, interval, switchMap, takeWhile, last } from 'rxjs';
 
-const API = (window as any).cyberMirror?.apiBase ?? 'http://127.0.0.1:8787/api';
+const API = (() => {
+  const custom = (window as any).cyberMirror?.apiBase;
+  if (custom) return custom;
+  const host = window.location.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost';
+  return `http://${host}:8787/api`;
+})();
 
 export interface IdentityProfile {
   full_name: string;
