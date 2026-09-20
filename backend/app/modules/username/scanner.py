@@ -1,4 +1,4 @@
-"""Native username scanner — checks hundreds of platforms with WMN-style detection."""
+"""Catalog-driven username scanner with optional WhatsMyName dataset support."""
 
 import asyncio
 import logging
@@ -24,7 +24,7 @@ BATCH_SIZE = 40
 class UsernameScanModule(NativeModule):
     id = "username_scan"
     name = "CyberMirror Username Scanner"
-    description = "Checks 400+ platforms for public username presence"
+    description = "Checks public profile URLs for username presence"
     category = "username_discovery"
 
     async def scan(self, profile: IdentityProfile, scan_id: str = "") -> list[Finding]:
