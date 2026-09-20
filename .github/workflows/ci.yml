@@ -102,11 +102,16 @@ jobs:
                   for pattern in machine_path_patterns
               )
 
+          windows_path = (
+              "C:" + chr(92) + "Users" + chr(92) + "alice"
+              + chr(92) + "file.txt"
+          )
+          posix_home_path = "/" + "home/alice/file.txt"
           content_cases = {
-              r"C:\Users\alice\file.txt": True,
-              r"prefix C:\Users\alice\file.txt": True,
-              "/home/alice/file.txt": True,
-              "path=/home/alice/file.txt": True,
+              windows_path: True,
+              "prefix " + windows_path: True,
+              posix_home_path: True,
+              "path=" + posix_home_path: True,
               "https://example.com/home/alice/profile": False,
               "See https://example.com/Users/alice/profile": False,
           }
