@@ -20,7 +20,11 @@ from app.services.evidence_lineage import (
     coalesce_identity_entities,
     independent_sources_by_entity,
 )
-from app.services.identity_hypotheses import build_identity_hypotheses
+from app.services.identity_hypotheses import (
+    build_identity_hypotheses,
+    detect_contradicting_evidence,
+    detect_cross_linked_entity_ids,
+)
 from app.services.investigation_budget import InvestigationBudget, default_budget, get_budget
 from app.services.investigation_journal import (
     InvestigationJournal,
@@ -413,10 +417,14 @@ async def analyze_finding_pages_async(
     )
     entities = seed_ents + observed
     lineage = EvidenceLineageIndex.build(artifacts, clusters)
+    cross_linked_ids = detect_cross_linked_entity_ids(profile, observed)
+    contradicting_by_entity = detect_contradicting_evidence(profile, observed)
     hypotheses = build_identity_hypotheses(
         profile,
         observed,
         independent_by_entity=independent_sources_by_entity(observed, lineage),
+        cross_linked_ids=cross_linked_ids,
+        contradicting_by_entity=contradicting_by_entity,
     )
     identity_step_by_entity: dict[str, str] = {}
     for hypothesis in hypotheses:
@@ -440,6 +448,9 @@ async def analyze_finding_pages_async(
             )
         )
         identity_step_by_entity[hypothesis.candidate_entity_id] = identity_step.id
+        value_key = (hypothesis.candidate_value or "").strip().lstrip("@").lower()
+        if value_key:
+            identity_step_by_entity[f"value:{value_key}"] = identity_step.id
         journal.add(
             JournalStep(
                 parent_ids=[identity_step.id],
@@ -455,11 +466,16 @@ async def analyze_finding_pages_async(
         )
 
     # Travel is derived only after author identity and mirror lineage are known.
-    # Mirror copies are skipped rather than emitted as duplicate travel claims.
+    # Mirror copies still invoke the extractor (so lineage is recorded in reasons)
+    # but are not emitted as independent travel conclusions.
     hypotheses_by_entity = {h.candidate_entity_id: h for h in hypotheses}
+    hypotheses_by_value = {
+        (h.candidate_value or "").strip().lstrip("@").lower(): h for h in hypotheses
+    }
     for artifact in artifacts:
-        if artifact.blocked_reason or lineage.is_mirror_artifact(artifact.id):
+        if artifact.blocked_reason:
             continue
+        is_mirror = lineage.is_mirror_artifact(artifact.id)
         artifact_entities = entities_by_artifact.get(artifact.id, [])
         author = next(
             (
@@ -469,17 +485,28 @@ async def analyze_finding_pages_async(
             ),
             None,
         )
-        author_hypothesis = hypotheses_by_entity.get(author.id) if author else None
+        author_hypothesis = None
+        if author:
+            author_hypothesis = hypotheses_by_entity.get(author.id)
+            if author_hypothesis is None:
+                author_hypothesis = hypotheses_by_value.get(author.normalized_value)
         travels = extract_travel_events(
             artifact,
             author_hypothesis=author_hypothesis,
+            is_mirror=is_mirror,
             location_entities=[e for e in artifact_entities if e.type.value == "location"],
         )
+        if is_mirror:
+            continue
         events.extend(travels)
         for travel in travels:
             parents = [acquisition_step_by_artifact.get(artifact.id, "")]
-            if author and author.id in identity_step_by_entity:
-                parents.append(identity_step_by_entity[author.id])
+            if author:
+                parent_id = identity_step_by_entity.get(author.id) or identity_step_by_entity.get(
+                    f"value:{author.normalized_value}"
+                )
+                if parent_id:
+                    parents.append(parent_id)
             event_step = journal.add(
                 JournalStep(
                     parent_ids=[parent for parent in parents if parent],

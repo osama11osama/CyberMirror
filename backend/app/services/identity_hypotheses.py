@@ -176,19 +176,94 @@ def evaluate_email_hypothesis(
     return hyp
 
 
+def detect_cross_linked_entity_ids(
+    profile: IdentityProfile,
+    entities: list[Entity],
+) -> set[str]:
+    """Mark identity entities co-observed with another seed-matching identity type.
+
+    Example: the same page shows both the seed handle and the seed email — that is
+    a direct public cross-link supporting those candidates.
+    """
+    seed_handle = normalize_handle(profile.username or "")
+    seed_email = normalize_email(profile.email or "")
+    if not seed_handle and not seed_email:
+        return set()
+
+    by_evidence: dict[str, list[Entity]] = {}
+    for entity in entities:
+        if entity.origin == IntelligenceOrigin.SEED:
+            continue
+        if entity.type not in (EntityType.HANDLE, EntityType.EMAIL, EntityType.SOCIAL_ACCOUNT):
+            continue
+        for evidence_id in entity.supporting_evidence_ids:
+            by_evidence.setdefault(evidence_id, []).append(entity)
+
+    linked: set[str] = set()
+    for group in by_evidence.values():
+        matching_handles = [
+            e
+            for e in group
+            if e.type in (EntityType.HANDLE, EntityType.SOCIAL_ACCOUNT)
+            and seed_handle
+            and normalize_handle(e.normalized_value or e.original_value) == seed_handle
+        ]
+        matching_emails = [
+            e
+            for e in group
+            if e.type == EntityType.EMAIL
+            and seed_email
+            and normalize_email(e.normalized_value or e.original_value) == seed_email
+        ]
+        if matching_handles and matching_emails:
+            for entity in matching_handles + matching_emails:
+                linked.add(entity.id)
+    return linked
+
+
+def detect_contradicting_evidence(
+    profile: IdentityProfile,
+    entities: list[Entity],
+) -> dict[str, list[str]]:
+    """Map entity id → evidence ids that contradict target ownership.
+
+    A page-claimed author handle that does not match the seed username is treated
+    as contradicting evidence for that candidate (wrong-person attribution).
+    """
+    seed_handle = normalize_handle(profile.username or "")
+    if not seed_handle:
+        return {}
+    out: dict[str, list[str]] = {}
+    for entity in entities:
+        if entity.origin == IntelligenceOrigin.SEED:
+            continue
+        if entity.type not in (EntityType.HANDLE, EntityType.SOCIAL_ACCOUNT):
+            continue
+        if entity.attributes.get("authorship") != "page_claimed":
+            continue
+        cand = normalize_handle(entity.normalized_value or entity.original_value)
+        if cand and cand != seed_handle:
+            out[entity.id] = list(entity.supporting_evidence_ids)
+    return out
+
+
 def build_identity_hypotheses(
     profile: IdentityProfile,
     entities: list[Entity],
     *,
     independent_by_entity: dict[str, int] | None = None,
     cross_linked_ids: set[str] | None = None,
+    contradicting_by_entity: dict[str, list[str]] | None = None,
 ) -> list[IdentityHypothesis]:
     indep = independent_by_entity or {}
     linked = cross_linked_ids or set()
+    contradicted = contradicting_by_entity or {}
     out: list[IdentityHypothesis] = []
     for ent in entities:
         if ent.origin == IntelligenceOrigin.SEED:
             continue
+        is_contra = ent.id in contradicted
+        contra_ids = contradicted.get(ent.id)
         if ent.type == EntityType.EMAIL:
             out.append(
                 evaluate_email_hypothesis(
@@ -196,6 +271,8 @@ def build_identity_hypotheses(
                     ent,
                     cross_linked=ent.id in linked,
                     independent_sources=indep.get(ent.id, 1),
+                    contradicting=is_contra,
+                    contradicting_evidence_ids=contra_ids,
                 )
             )
             continue
@@ -207,6 +284,8 @@ def build_identity_hypotheses(
                 ent,
                 cross_linked=ent.id in linked,
                 independent_sources=indep.get(ent.id, 1),
+                contradicting=is_contra,
+                contradicting_evidence_ids=contra_ids,
             )
         )
     return out
