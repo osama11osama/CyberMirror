@@ -38,6 +38,8 @@ _SKIP_SEGMENTS = {
     "search", "watch", "p", "posts", "status", "articles", "article",
     "blog", "news", "tag", "tags", "category", "explore", "about",
     "login", "signup", "share", "hashtag", "reel", "reels", "stories",
+    "groups", "group", "company", "jobs", "feed", "events", "marketplace",
+    "pages", "photo", "photos", "video", "videos", "channel", "c",
 }
 
 
@@ -55,9 +57,6 @@ def extract_profile_handle(url: str, *, expected_username: str | None = None) ->
     except Exception:
         return None
     host = (parsed.netloc or "").lower().split(":")[0]
-    if host.startswith("www.") and host not in _PROFILE_HOST_PREFIXES:
-        # Keep www. variant lookup; also try without www for prefix table.
-        pass
     path = (parsed.path or "").strip("/")
     if not path:
         return None
@@ -71,19 +70,19 @@ def extract_profile_handle(url: str, *, expected_username: str | None = None) ->
 
     if prefixes is not None:
         # Known profile host: strip configured prefixes then take next segment.
-        idx = 0
         if prefixes:
             head = parts[0].lstrip("@").lower()
-            # TikTok style /@user
+            prefix_set = {p.lstrip("@").lower() for p in prefixes}
+            # TikTok / Medium style /@user when "@" is a configured prefix.
             if parts[0].startswith("@") and "@" in prefixes:
                 handle = parts[0].lstrip("@")
-            elif head in {p.lstrip("@").lower() for p in prefixes}:
-                idx = 1
-                if idx >= len(parts):
+            elif head in prefix_set:
+                if len(parts) < 2:
                     return None
-                handle = parts[idx].lstrip("@")
+                handle = parts[1].lstrip("@")
             else:
-                handle = parts[0].lstrip("@")
+                # Required profile prefix missing (e.g. linkedin.com/groups/…).
+                return None
         else:
             handle = parts[0].lstrip("@")
         if handle and len(handle) >= 2 and handle.lower() not in _SKIP_SEGMENTS:
