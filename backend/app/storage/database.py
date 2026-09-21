@@ -12,6 +12,7 @@ from app.services.timeutil import parse_iso_datetime, to_iso, utc_now_iso
 
 # Bump when exposure scoring formula changes so legacy rows are backfilled once.
 CURRENT_SCORING_VERSION = 1
+_TERMINAL_SCAN_STATUSES = frozenset({"completed", "cancelled", "failed"})
 
 
 def _store_profile(profile: IdentityProfile) -> str:
@@ -149,33 +150,61 @@ def sync_risk_score(scan_id: str, findings: list[Finding], stored: float | None 
 
     Findings are already loaded by callers (detail/dashboard/export); this persists
     the live score so History/trends can trust stored values after one backfill.
+    Never persists while a scan is still running (avoids stamping a partial score).
     """
     from app.services.exposure_scoring import compute_risk_score
 
     score = float(compute_risk_score(findings))
     with _connect() as conn:
         row = conn.execute(
-            "SELECT risk_score, scoring_version FROM scans WHERE id=?",
+            "SELECT risk_score, scoring_version, status FROM scans WHERE id=?",
             (scan_id,),
         ).fetchone()
         if not row:
             return score
+        if row["status"] not in _TERMINAL_SCAN_STATUSES:
+            return score
         stored_score = float(stored) if stored is not None else float(row["risk_score"] or 0)
         version = _row_scoring_version(row)
-        if version < CURRENT_SCORING_VERSION or abs(stored_score - score) > 0.05:
+        if version < CURRENT_SCORING_VERSION:
+            cur = conn.execute(
+                """
+                UPDATE scans SET risk_score=?, scoring_version=?
+                WHERE id=? AND scoring_version < ?
+                """,
+                (score, CURRENT_SCORING_VERSION, scan_id, CURRENT_SCORING_VERSION),
+            )
+            conn.commit()
+            if cur.rowcount == 0:
+                latest = conn.execute(
+                    "SELECT risk_score FROM scans WHERE id=?", (scan_id,)
+                ).fetchone()
+                return float(latest["risk_score"] or 0) if latest else score
+        elif abs(stored_score - score) > 0.05:
             conn.execute(
-                "UPDATE scans SET risk_score=?, scoring_version=? WHERE id=?",
-                (score, CURRENT_SCORING_VERSION, scan_id),
+                "UPDATE scans SET risk_score=? WHERE id=? AND scoring_version=?",
+                (score, scan_id, CURRENT_SCORING_VERSION),
             )
             conn.commit()
     return score
 
 
 def _backfill_scan_score(
-    conn: sqlite3.Connection, scan_id: str
+    conn: sqlite3.Connection,
+    scan_id: str,
+    *,
+    status: str,
+    stored_score: float,
 ) -> float:
-    """One-time recompute for a legacy row; stamps CURRENT_SCORING_VERSION."""
+    """One-time recompute for a legacy terminal row; stamps CURRENT_SCORING_VERSION.
+
+    Skips nonterminal scans. Uses a version-gated UPDATE so a concurrent completion
+    that already stamped the current version is not overwritten with a stale score.
+    """
     from app.services.exposure_scoring import compute_risk_score
+
+    if status not in _TERMINAL_SCAN_STATUSES:
+        return float(stored_score)
 
     finding_rows = conn.execute(
         "SELECT * FROM findings WHERE scan_id=? ORDER BY timestamp",
@@ -183,10 +212,18 @@ def _backfill_scan_score(
     ).fetchall()
     findings = [row_to_finding(dict(f)) for f in finding_rows]
     score = float(compute_risk_score(findings))
-    conn.execute(
-        "UPDATE scans SET risk_score=?, scoring_version=? WHERE id=?",
-        (score, CURRENT_SCORING_VERSION, scan_id),
+    cur = conn.execute(
+        """
+        UPDATE scans SET risk_score=?, scoring_version=?
+        WHERE id=? AND scoring_version < ?
+        """,
+        (score, CURRENT_SCORING_VERSION, scan_id, CURRENT_SCORING_VERSION),
     )
+    if cur.rowcount == 0:
+        row = conn.execute(
+            "SELECT risk_score FROM scans WHERE id=?", (scan_id,)
+        ).fetchone()
+        return float(row["risk_score"] or 0) if row else score
     return score
 
 
@@ -246,7 +283,15 @@ def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
             if _row_scoring_version(r) >= CURRENT_SCORING_VERSION:
                 out.append(_row_to_summary(r))
                 continue
-            score = _backfill_scan_score(conn, r["id"])
+            if r["status"] not in _TERMINAL_SCAN_STATUSES:
+                out.append(_row_to_summary(r))
+                continue
+            score = _backfill_scan_score(
+                conn,
+                r["id"],
+                status=r["status"],
+                stored_score=float(r["risk_score"] or 0),
+            )
             dirty = True
             out.append(_row_to_summary(r, risk_score=score))
         if dirty:
@@ -402,7 +447,12 @@ def risk_trends(limit: int = 20) -> list[dict]:
             if _row_scoring_version(r) >= CURRENT_SCORING_VERSION:
                 score = float(r["risk_score"] or 0)
             else:
-                score = _backfill_scan_score(conn, r["id"])
+                score = _backfill_scan_score(
+                    conn,
+                    r["id"],
+                    status=r["status"],
+                    stored_score=float(r["risk_score"] or 0),
+                )
                 dirty = True
             out.append(
                 {
