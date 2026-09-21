@@ -168,24 +168,27 @@ def parse_fuzzy_date(
             precision=DatePrecision.EXACT_DATETIME,
             datetime_value=dt,
         )
-    if year is not None and month is not None and day is not None:
-        return FuzzyDate(
-            raw_text=raw or f"{year:04d}-{month:02d}-{day:02d}",
-            value=date(year, month, day),
-            precision=DatePrecision.EXACT_DAY,
-        )
-    if year is not None and month is not None:
-        return FuzzyDate(
-            raw_text=raw or f"{year:04d}-{month:02d}",
-            value=date(year, month, 1),
-            precision=DatePrecision.MONTH,
-        )
-    if year is not None:
-        return FuzzyDate(
-            raw_text=raw or f"{year:04d}",
-            value=date(year, 1, 1),
-            precision=DatePrecision.YEAR,
-        )
+    try:
+        if year is not None and month is not None and day is not None:
+            return FuzzyDate(
+                raw_text=raw or f"{year:04d}-{month:02d}-{day:02d}",
+                value=date(year, month, day),
+                precision=DatePrecision.EXACT_DAY,
+            )
+        if year is not None and month is not None:
+            return FuzzyDate(
+                raw_text=raw or f"{year:04d}-{month:02d}",
+                value=date(year, month, 1),
+                precision=DatePrecision.MONTH,
+            )
+        if year is not None:
+            return FuzzyDate(
+                raw_text=raw or f"{year:04d}",
+                value=date(year, 1, 1),
+                precision=DatePrecision.YEAR,
+            )
+    except ValueError:
+        return FuzzyDate(raw_text=raw, precision=DatePrecision.UNKNOWN)
     return FuzzyDate(raw_text=raw, precision=DatePrecision.UNKNOWN)
 
 

@@ -51,9 +51,10 @@ def test_delete_deep_artifacts(tmp_path, monkeypatch):
     from app.config import settings
 
     monkeypatch.setattr(settings, "cache_dir", tmp_path)
-    root = deep_artifacts_dir("s1")
+    scan_id = "123e4567-e89b-12d3-a456-426614174000"
+    root = deep_artifacts_dir(scan_id)
     root.mkdir(parents=True)
     f = root / "page.txt"
     f.write_text("excerpt", encoding="utf-8")
-    assert delete_deep_artifacts("s1") == 1
+    assert delete_deep_artifacts(scan_id) == 1
     assert not f.exists()

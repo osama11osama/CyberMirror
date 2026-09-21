@@ -120,6 +120,82 @@ def test_travel_keeps_stay_and_review_dates_distinct():
         assert ev.publication.value != ev.start.value or ev.publication.precision != ev.start.precision
 
 
+def test_invalid_iso_date_does_not_abort_extraction():
+    from app.services.page_analyzer import artifact_from_http
+    from app.services.entity_extractor import extract_entities
+
+    body = "Weird date 2026-99-40 and valid 2026-06-15 appear together."
+    art = artifact_from_http(source_url="https://x.example/", body=body, status=200, title="dates")
+    ents = extract_entities(art)
+    norms = [e.normalized_value for e in ents if e.type.value == "datetime_expression"]
+    assert "2026-06-15" in norms
+    assert not any("99" in n for n in norms)
+
+
+def test_email_hypothesis_matches_email_seed():
+    from app.models.intelligence import Entity, EntityType, IntelligenceOrigin
+    from app.models.schemas import IdentityProfile
+    from app.services.identity_hypotheses import HypothesisStatus, build_identity_hypotheses
+
+    profile = IdentityProfile(email="me@example.com")  # no username
+    match = Entity(
+        type=EntityType.EMAIL,
+        original_value="me@example.com",
+        normalized_value="me@example.com",
+        origin=IntelligenceOrigin.OBSERVED,
+        supporting_evidence_ids=["e1"],
+    )
+    other = Entity(
+        type=EntityType.EMAIL,
+        original_value="other@example.com",
+        normalized_value="other@example.com",
+        origin=IntelligenceOrigin.OBSERVED,
+        supporting_evidence_ids=["e2"],
+    )
+    hyps = build_identity_hypotheses(profile, [match, other])
+    by_val = {h.candidate_value: h for h in hyps}
+    assert by_val["me@example.com"].status in (HypothesisStatus.LIKELY, HypothesisStatus.VERIFIED, HypothesisStatus.POSSIBLE)
+    assert "email" in " ".join(by_val["me@example.com"].reasons).lower()
+    assert by_val["other@example.com"].status == HypothesisStatus.UNLIKELY
+
+
+def test_pivot_only_emits_contextual_queries():
+    from app.models.intelligence import Entity, EntityType, IntelligenceOrigin
+    from app.models.schemas import IdentityProfile
+    from app.services.investigation_budget import default_budget
+    from app.services.pivot_engine import PivotEngineState, next_pivot_queries
+    from app.services.query_planner import QueryFamily
+
+    profile = IdentityProfile(username="alice")
+    strong = Entity(
+        type=EntityType.LOCATION,
+        original_value="Lisbon",
+        normalized_value="lisbon",
+        confidence=0.9,
+        origin=IntelligenceOrigin.OBSERVED,
+    )
+    budget = default_budget("00000000-0000-4000-8000-000000000099")
+    budget.max_generated_queries = 20
+    state = PivotEngineState()
+    q = next_pivot_queries(profile, [strong], budget, state)
+    assert q
+    assert all(p.family == QueryFamily.CONTEXTUAL for p in q)
+
+
+def test_artifact_scan_id_rejects_traversal():
+    from app.services.investigation_budget import validate_artifact_scan_id
+    import pytest
+
+    with pytest.raises(ValueError):
+        validate_artifact_scan_id("..")
+    with pytest.raises(ValueError):
+        validate_artifact_scan_id("%2e%2e")
+    with pytest.raises(ValueError):
+        validate_artifact_scan_id("../cache")
+    ok = validate_artifact_scan_id("123e4567-e89b-12d3-a456-426614174000")
+    assert ok.startswith("123e4567")
+
+
 def test_full_pipeline_and_report_escaping():
     profile = IdentityProfile(username="RareHandle99")
     finding = Finding(

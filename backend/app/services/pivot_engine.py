@@ -99,10 +99,10 @@ def next_pivot_queries(
     )
     out: list[PlannedQuery] = []
     for p in plans:
-        if p.depth == 0 and p.family != QueryFamily.CONTEXTUAL:
-            # Only contextual follow-ups recurse; depth-0 identity queries are for planning.
-            if p.family != QueryFamily.CONTEXTUAL:
-                continue
+        # Recursive pivots must only emit contextual follow-ups, never re-run
+        # the full identity/activity/travel/technical seed plan.
+        if p.family != QueryFamily.CONTEXTUAL:
+            continue
         nq = " ".join(p.query.lower().split())
         if nq in state.executed_queries:
             continue

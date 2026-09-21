@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -166,10 +167,31 @@ def clear_budget(scan_id: str) -> None:
 
 
 def deep_artifacts_dir(scan_id: str | None = None) -> Path:
-    base = settings.cache_dir / "deep_artifacts"
-    if scan_id:
-        return base / scan_id
-    return base
+    base = (settings.cache_dir / "deep_artifacts").resolve()
+    if not scan_id:
+        return base
+    safe_id = validate_artifact_scan_id(scan_id)
+    root = (base / safe_id).resolve()
+    try:
+        root.relative_to(base)
+    except ValueError as exc:
+        raise ValueError("artifact path escapes deep_artifacts root") from exc
+    return root
+
+
+_SCAN_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def validate_artifact_scan_id(scan_id: str) -> str:
+    """Reject path traversal / non-UUID scan identifiers used for artifact paths."""
+    value = (scan_id or "").strip()
+    if not _SCAN_ID_RE.fullmatch(value):
+        raise ValueError("scan_id must be a UUID")
+    if ".." in value or "/" in value or "\\" in value:
+        raise ValueError("invalid scan_id")
+    return value
 
 
 def list_deep_artifacts(scan_id: str) -> list[dict]:
@@ -184,12 +206,30 @@ def list_deep_artifacts(scan_id: str) -> list[dict]:
 
 
 def delete_deep_artifacts(scan_id: str | None = None) -> int:
-    """Delete locally stored deep-analysis artifacts. Returns files removed."""
-    root = deep_artifacts_dir(scan_id) if scan_id else deep_artifacts_dir()
+    """Delete locally stored deep-analysis artifacts. Returns files removed.
+
+    When ``scan_id`` is set it must be a UUID; bulk delete (None) only clears
+    the deep_artifacts root itself, never a parent directory.
+    """
+    if scan_id is None:
+        root = (settings.cache_dir / "deep_artifacts").resolve()
+        base = root
+    else:
+        root = deep_artifacts_dir(scan_id)
+        base = (settings.cache_dir / "deep_artifacts").resolve()
+        try:
+            root.relative_to(base)
+        except ValueError:
+            return 0
     if not root.exists():
         return 0
     removed = 0
     for p in sorted(root.rglob("*"), reverse=True):
+        # Never follow a resolved path outside the artifacts base.
+        try:
+            p.resolve().relative_to(base)
+        except ValueError:
+            continue
         if p.is_file():
             p.unlink(missing_ok=True)
             removed += 1
