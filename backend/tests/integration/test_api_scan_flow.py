@@ -6,6 +6,7 @@ from app.engine.scan_engine import ScanEngine
 from app.models.evidence import VerificationState
 from app.models.schemas import Finding, FindingCategory, FindingOutcome
 from app.services.page_analyzer import artifact_from_http
+from app.services.investigation_budget import clear_budget, default_budget, get_budget
 
 
 def test_health_is_public_and_reports_version(isolated_app):
@@ -132,3 +133,12 @@ def test_intelligence_route_acquires_url_only_finding(isolated_app, monkeypatch)
     assert intelligence.status_code == 200
     assert acquired == ["https://public.example/profile"]
     assert intelligence.json()["artifacts"][0]["acquisition_method"] == "http"
+
+    active = default_budget(scan_id)
+    overlapping = client.get(
+        f"/api/scans/{scan_id}/intelligence?refresh=true",
+        headers=headers,
+    )
+    assert overlapping.status_code == 409
+    assert get_budget(scan_id) is active
+    clear_budget(scan_id, expected=active)

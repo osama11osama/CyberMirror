@@ -15,7 +15,11 @@ from app.models.intelligence import (
 from app.models.schemas import Finding, IdentityProfile
 from app.services.activity_extractor import extract_activities
 from app.services.evidence_clustering import cluster_artifacts
-from app.services.evidence_lineage import EvidenceLineageIndex, independent_sources_by_entity
+from app.services.evidence_lineage import (
+    EvidenceLineageIndex,
+    coalesce_identity_entities,
+    independent_sources_by_entity,
+)
 from app.services.identity_hypotheses import build_identity_hypotheses
 from app.services.investigation_budget import InvestigationBudget, default_budget, get_budget
 from app.services.investigation_journal import (
@@ -215,7 +219,13 @@ async def analyze_finding_pages_async(
 
     # Translate evidence -> artifact -> cluster before calculating identity
     # corroboration.  Mirrors therefore contribute one observation.
-    observed = [e for e in entities if e.origin.value != "seed"]
+    # Coalesce duplicate handle/email entities so supporting_evidence_ids match
+    # the independent-source count used in hypothesis confidence.
+    seed_ents = [e for e in entities if e.origin.value == "seed"]
+    observed = coalesce_identity_entities(
+        [e for e in entities if e.origin.value != "seed"]
+    )
+    entities = seed_ents + observed
     lineage = EvidenceLineageIndex.build(artifacts, clusters)
     hypotheses = build_identity_hypotheses(
         profile,

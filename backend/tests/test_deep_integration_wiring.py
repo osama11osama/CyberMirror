@@ -80,6 +80,24 @@ def test_lineage_counts_mirrors_once_and_independent_sources_separately():
     counts = independent_sources_by_entity(entities, lineage)
     assert set(counts.values()) == {2}
 
+    from app.services.evidence_lineage import coalesce_identity_entities
+    from app.services.identity_hypotheses import build_identity_hypotheses
+
+    coalesced = coalesce_identity_entities(entities)
+    assert len(coalesced) == 1
+    assert set(coalesced[0].supporting_evidence_ids) == {
+        original.evidence_id,
+        mirror.evidence_id,
+        independent.evidence_id,
+    }
+    hyp = build_identity_hypotheses(
+        IdentityProfile(username="RareHandle99"),
+        coalesced,
+        independent_by_entity=independent_sources_by_entity(coalesced, lineage),
+    )[0]
+    assert len(hyp.supporting_evidence_ids) >= 2
+    assert "independent" in " ".join(hyp.reasons).lower() or hyp.confidence >= 0.45
+
     event = Event(
         type=EventType.OTHER,
         supporting_evidence_ids=[
