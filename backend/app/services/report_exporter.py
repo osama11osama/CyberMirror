@@ -61,7 +61,8 @@ def export_json(
     return path
 
 
-def export_csv(findings: list[Finding], path: Path) -> Path:
+def export_csv(findings: list[Finding], path: Path, *, intelligence: dict | None = None) -> Path:
+    """Export findings CSV, and when intelligence is present also write a sibling timeline CSV."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         "source", "platform", "title", "url", "category",
@@ -72,6 +73,128 @@ def export_csv(findings: list[Finding], path: Path) -> Path:
         writer.writeheader()
         for finding in findings:
             writer.writerow({k: getattr(finding, k, "") for k in fields})
+
+    if intelligence:
+        timeline_path = path.with_name(path.stem + "_timeline.csv")
+        export_timeline_csv(intelligence, timeline_path)
+    return path
+
+
+def export_timeline_csv(intelligence: dict, path: Path) -> Path:
+    """Structured event/timeline CSV export (#65)."""
+    from app.services.intelligence_report import build_intelligence_summary
+
+    summary = build_intelligence_summary(intelligence)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fields = [
+        "record_type",
+        "event_id",
+        "event_type",
+        "date_label",
+        "precision",
+        "description",
+        "platform",
+        "location",
+        "confidence",
+        "verification_label",
+        "origin",
+        "independent_observations",
+        "hypothesis_id",
+        "evidence_ids",
+        "journal_ref",
+        "source_url",
+    ]
+    rows: list[dict] = []
+    for entry in (summary.get("timeline") or {}).get("dated") or []:
+        rows.append(
+            {
+                "record_type": "timeline_dated",
+                "event_id": entry.get("event_id") or "",
+                "event_type": entry.get("event_type") or "",
+                "date_label": entry.get("date_label") or "",
+                "precision": entry.get("precision") or "",
+                "description": entry.get("description") or "",
+                "platform": "",
+                "location": "",
+                "confidence": "",
+                "verification_label": entry.get("verification_label") or "",
+                "origin": "",
+                "independent_observations": entry.get("independent_observations") or "",
+                "hypothesis_id": entry.get("hypothesis_id") or "",
+                "evidence_ids": ";".join(entry.get("evidence_ids") or []),
+                "journal_ref": "",
+                "source_url": "",
+            }
+        )
+    for entry in (summary.get("timeline") or {}).get("unknown_date") or []:
+        rows.append(
+            {
+                "record_type": "timeline_unknown",
+                "event_id": entry.get("event_id") or "",
+                "event_type": entry.get("event_type") or "",
+                "date_label": "unknown",
+                "precision": "unknown",
+                "description": entry.get("description") or "",
+                "platform": "",
+                "location": "",
+                "confidence": "",
+                "verification_label": entry.get("verification_label") or "",
+                "origin": "",
+                "independent_observations": "",
+                "hypothesis_id": "",
+                "evidence_ids": "",
+                "journal_ref": "",
+                "source_url": "",
+            }
+        )
+    for act in summary.get("public_activity") or []:
+        rows.append(
+            {
+                "record_type": "activity",
+                "event_id": act.get("event_id") or "",
+                "event_type": act.get("type") or "",
+                "date_label": act.get("date_label") or "",
+                "precision": act.get("date_precision") or "",
+                "description": act.get("title") or "",
+                "platform": act.get("platform") or "",
+                "location": "",
+                "confidence": act.get("confidence") or "",
+                "verification_label": "",
+                "origin": "observed",
+                "independent_observations": "",
+                "hypothesis_id": "",
+                "evidence_ids": ";".join(act.get("evidence_ids") or []),
+                "journal_ref": act.get("journal_ref") or "",
+                "source_url": act.get("source_url") or "",
+            }
+        )
+    for travel in summary.get("travel_exposure") or []:
+        rows.append(
+            {
+                "record_type": "travel",
+                "event_id": travel.get("event_id") or "",
+                "event_type": "travel",
+                "date_label": travel.get("stay_raw") or "",
+                "precision": travel.get("stay_precision") or "",
+                "description": travel.get("title") or "",
+                "platform": "",
+                "location": travel.get("location") or "",
+                "confidence": travel.get("confidence") or "",
+                "verification_label": travel.get("confidence_label") or "",
+                "origin": "derived",
+                "independent_observations": "",
+                "hypothesis_id": "",
+                "evidence_ids": ";".join(travel.get("evidence_ids") or []),
+                "journal_ref": travel.get("journal_ref") or "",
+                "source_url": "",
+            }
+        )
+
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
     return path
 
 

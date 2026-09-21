@@ -1,4 +1,4 @@
-"""Build Cytoscape-compatible graph from findings (evidence-backed)."""
+"""Build Cytoscape-compatible graph from findings + deep intelligence (#64)."""
 
 from __future__ import annotations
 
@@ -39,7 +39,6 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
             nodes.append(GraphNode(id=nid, label=label, type=ntype, data=data))
             node_ids.add(nid)
         else:
-            # Merge enriching fields onto existing node when re-visited.
             for n in nodes:
                 if n.id == nid:
                     n.data.update({k: v for k, v in data.items() if v is not None})
@@ -144,7 +143,6 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
         )
         finding_node_ids[i] = fid
 
-        # Weak / blocked observations stay on the graph but do not attach as strong links.
         if not _is_strong_observation(f) and not is_derived:
             edges.append(GraphEdge(
                 id=f"ef-weak-{i}",
@@ -171,7 +169,6 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
         if handle and _is_strong_observation(f):
             handle_to_findings[handle].append((i, f, fid))
 
-    # Multi-platform handle corroboration nodes.
     for handle, items in handle_to_findings.items():
         platforms = {f.platform for _, f, _ in items if f.platform}
         if len(platforms) < 2:
@@ -202,7 +199,6 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
                 label="matches seed username",
             ))
 
-    # Wire derived correlator nodes to their supporting finding nodes when possible.
     for i, f in enumerate(findings):
         if f.source != "identity_correlator":
             continue
@@ -222,23 +218,49 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
     return GraphData(nodes=nodes, edges=edges)
 
 
+_ACTIVITY_TYPES = {
+    "forum_post",
+    "comment",
+    "review",
+    "social_post",
+    "repository_activity",
+}
+_MENTION_TYPES = {"product", "vehicle", "topic", "technology", "organization"}
+
+
 def enrich_graph_with_intelligence(graph: GraphData, intel: dict) -> GraphData:
-    """Add entity/event/hypothesis/cluster nodes from a v2.5 intelligence payload."""
+    """Add entity/event/hypothesis/cluster nodes and semantic edges (#64)."""
     nodes = list(graph.nodes)
     edges = list(graph.edges)
     existing = {n.id for n in nodes}
+    edge_ids = {e.id for e in edges}
 
     def add(nid: str, label: str, ntype: str, **data) -> None:
         if nid in existing:
+            for n in nodes:
+                if n.id == nid:
+                    n.data.update({k: v for k, v in data.items() if v is not None})
+                    break
             return
         existing.add(nid)
         nodes.append(GraphNode(id=nid, label=label, type=ntype, data=data))
 
-    for ent in intel.get("bundle", {}).get("entities") or []:
+    def link(eid: str, source: str, target: str, label: str) -> None:
+        if eid in edge_ids or source not in existing or target not in existing:
+            return
+        edge_ids.add(eid)
+        edges.append(GraphEdge(id=eid, source=source, target=target, label=label))
+
+    entities = intel.get("bundle", {}).get("entities") or []
+    events = intel.get("bundle", {}).get("events") or []
+    entity_by_id = {e.get("id"): e for e in entities if e.get("id")}
+
+    for ent in entities:
         eid = ent.get("id") or ""
         if not eid:
             continue
         origin = ent.get("origin") or "observed"
+        attrs = ent.get("attributes") or {}
         add(
             f"ent:{eid}",
             (ent.get("original_value") or ent.get("normalized_value") or ent.get("type") or "entity")[:60],
@@ -248,12 +270,16 @@ def enrich_graph_with_intelligence(graph: GraphData, intel: dict) -> GraphData:
             confidence=ent.get("confidence"),
             origin=origin,
             evidence_ids=ent.get("supporting_evidence_ids") or [],
+            authorship=attrs.get("authorship"),
+            status=attrs.get("authorship") or origin,
         )
 
-    for ev in intel.get("bundle", {}).get("events") or []:
+    for ev in events:
         eid = ev.get("id") or ""
         if not eid:
             continue
+        start = ev.get("start") or {}
+        pub = ev.get("publication") or {}
         add(
             f"event:{eid}",
             (ev.get("title") or ev.get("type") or "event")[:60],
@@ -264,27 +290,38 @@ def enrich_graph_with_intelligence(graph: GraphData, intel: dict) -> GraphData:
             location=ev.get("location_text") or "",
             evidence_ids=ev.get("supporting_evidence_ids") or [],
             reason=ev.get("derivation_reason") or "",
+            precision=start.get("precision") or "unknown",
+            stay_raw=start.get("raw_text") or "",
+            publication_precision=pub.get("precision") or "",
+            publication_raw=pub.get("raw_text") or "",
+            source_url=ev.get("source_url") or "",
+            origin=ev.get("origin") or "observed",
         )
         for rid in ev.get("related_entity_ids") or []:
-            if f"ent:{rid}" in existing:
-                edges.append(
-                    GraphEdge(
-                        id=f"ev-ent-{eid}-{rid}",
-                        source=f"event:{eid}",
-                        target=f"ent:{rid}",
-                        label="mentions",
-                    )
-                )
+            ent = entity_by_id.get(rid) or {}
+            etype = ent.get("type")
+            if etype in _MENTION_TYPES:
+                link(f"ev-mention-{eid}-{rid}", f"event:{eid}", f"ent:{rid}", "mentions")
+            attrs = ent.get("attributes") or {}
+            if attrs.get("authorship") == "page_claimed" and (ev.get("type") in _ACTIVITY_TYPES):
+                link(f"ev-authored-{eid}-{rid}", f"ent:{rid}", f"event:{eid}", "authored")
         loc = ev.get("location_entity_id")
-        if loc and f"ent:{loc}" in existing:
-            edges.append(
-                GraphEdge(
-                    id=f"ev-loc-{eid}",
-                    source=f"event:{eid}",
-                    target=f"ent:{loc}",
-                    label="occurred at",
-                )
-            )
+        if loc:
+            link(f"ev-loc-{eid}", f"event:{eid}", f"ent:{loc}", "occurred at")
+
+    # Review/activity → travel (shared evidence).
+    activity_events = [e for e in events if e.get("type") in _ACTIVITY_TYPES]
+    travel_events = [e for e in events if e.get("type") == "travel"]
+    for travel in travel_events:
+        t_ids = set(travel.get("supporting_evidence_ids") or [])
+        tid = travel.get("id")
+        if not tid or not t_ids:
+            continue
+        for activity in activity_events:
+            aid = activity.get("id")
+            a_ids = set(activity.get("supporting_evidence_ids") or [])
+            if aid and t_ids & a_ids:
+                link(f"describes-{aid}-{tid}", f"event:{aid}", f"event:{tid}", "describes stay")
 
     for hyp in intel.get("hypotheses") or []:
         hid = hyp.get("id") or ""
@@ -300,29 +337,67 @@ def enrich_graph_with_intelligence(graph: GraphData, intel: dict) -> GraphData:
             confidence=hyp.get("confidence"),
             reasons=hyp.get("reasons") or [],
             evidence_ids=hyp.get("supporting_evidence_ids") or [],
+            contradicting_evidence_ids=hyp.get("contradicting_evidence_ids") or [],
+            origin="derived",
         )
-        if cand and f"ent:{cand}" in existing:
-            edges.append(
-                GraphEdge(
-                    id=f"hyp-ent-{hid}",
-                    source=f"hyp:{hid}",
-                    target=f"ent:{cand}",
-                    label="hypothesized ownership",
-                )
-            )
+        link(f"hyp-person-{hid}", "person", f"hyp:{hid}", "investigates")
+        if cand:
+            link(f"hyp-ent-{hid}", f"hyp:{hid}", f"ent:{cand}", "hypothesized ownership")
 
+    # Evidence clusters + lineage.
+    artifacts = {a.get("id"): a for a in (intel.get("artifacts") or []) if a.get("id")}
+    evidence_to_artifact = {
+        a.get("evidence_id"): a.get("id")
+        for a in artifacts.values()
+        if a.get("evidence_id")
+    }
     for cl in intel.get("clusters") or []:
         cid = cl.get("id") or ""
         if not cid:
             continue
+        lineage = cl.get("lineage_type") or "unknown"
         add(
             f"cluster:{cid}",
-            f"Evidence cluster ({cl.get('lineage_type', 'unknown')})",
+            f"Evidence cluster ({lineage})",
             "EvidenceCluster",
             role="derived",
             independent=cl.get("independent_source_count"),
             mirrors=cl.get("mirror_count"),
             reason=cl.get("reason") or "",
+            lineage_type=lineage,
+            canonical_artifact_id=cl.get("canonical_artifact_id") or "",
+            member_artifact_ids=cl.get("member_artifact_ids") or [],
+            is_mirror_cluster=bool(int(cl.get("mirror_count") or 0)),
+            origin="derived",
         )
+        for artifact_id in cl.get("member_artifact_ids") or []:
+            art = artifacts.get(artifact_id) or {}
+            is_canonical = artifact_id == cl.get("canonical_artifact_id")
+            add(
+                f"artifact:{artifact_id}",
+                (art.get("title") or art.get("source_url") or "artifact")[:60],
+                "EvidenceArtifact",
+                role="discovered",
+                origin="observed",
+                url=art.get("final_url") or art.get("source_url") or "",
+                evidence_id=art.get("evidence_id") or "",
+                is_mirror=not is_canonical,
+                lineage="canonical" if is_canonical else "mirror",
+                acquisition=art.get("acquisition_method") or "",
+            )
+            link(
+                f"cluster-art-{cid}-{artifact_id}",
+                f"artifact:{artifact_id}",
+                f"cluster:{cid}",
+                "member of" if is_canonical else "derived from",
+            )
+
+        for hyp in intel.get("hypotheses") or []:
+            hid = hyp.get("id") or ""
+            for evidence_id in hyp.get("supporting_evidence_ids") or []:
+                artifact_id = evidence_to_artifact.get(evidence_id)
+                if artifact_id and artifact_id in (cl.get("member_artifact_ids") or []):
+                    link(f"hyp-cl-{hid}-{cid}", f"hyp:{hid}", f"cluster:{cid}", "supported by")
+                    break
 
     return GraphData(nodes=nodes, edges=edges)

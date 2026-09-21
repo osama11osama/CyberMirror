@@ -21,6 +21,14 @@ interface NodeDetail {
   verification?: string;
   role?: string;
   reason?: string;
+  entityType?: string;
+  eventType?: string;
+  status?: string;
+  confidence?: number;
+  precision?: string;
+  location?: string;
+  lineage?: string;
+  evidenceIds?: string[];
 }
 
 @Component({
@@ -43,18 +51,26 @@ interface NodeDetail {
         <option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
       </select>
       <select [(ngModel)]="verificationFilter" (ngModelChange)="applyFilter()" class="scan-select">
-        <option value="">All verification</option>
+        <option value="">All verification / hypothesis</option>
         <option value="verified">verified</option>
         <option value="likely">likely</option>
         <option value="possible">possible</option>
         <option value="blocked">blocked</option>
         <option value="derived">derived / correlation</option>
       </select>
+      <select [(ngModel)]="nodeTypeFilter" (ngModelChange)="applyFilter()" class="scan-select">
+        <option value="">All node types</option>
+        <option>Entity</option><option>Event</option><option>Hypothesis</option>
+        <option>EvidenceCluster</option><option>EvidenceArtifact</option>
+        <option>Finding</option><option>PublicProfile</option><option>Correlation</option>
+      </select>
       <select [(ngModel)]="sourceFilter" (ngModelChange)="applyFilter()" class="scan-select">
         <option value="">All sources</option>
         <option *ngFor="let s of sourceOptions" [value]="s">{{ s }}</option>
       </select>
+      <label class="chk"><input type="checkbox" [(ngModel)]="hideMirrors" (ngModelChange)="applyFilter()" /> Hide mirrors</label>
       <a class="btn-primary" *ngIf="scanId" [routerLink]="['/reports', scanId]">Export Report</a>
+      <a class="btn-secondary" *ngIf="scanId" [routerLink]="['/scan', scanId]">Timeline / Journal</a>
     </div>
 
     <div class="graph-layout">
@@ -66,7 +82,11 @@ interface NodeDetail {
           <span><i class="dot user"></i> Username</span>
           <span><i class="dot profile"></i> Public Profile</span>
           <span><i class="dot corr"></i> Correlation</span>
-          <span class="hint">Seed nodes = search inputs · Discovery = observed evidence</span>
+          <span><i class="dot entity"></i> Entity</span>
+          <span><i class="dot event"></i> Event</span>
+          <span><i class="dot hyp"></i> Hypothesis</span>
+          <span><i class="dot cluster"></i> Cluster</span>
+          <span class="hint">Seed = input · Observed = evidence · Derived = intelligence</span>
         </div>
       </div>
 
@@ -78,16 +98,27 @@ interface NodeDetail {
         </div>
         <span class="type-badge">{{ selected.type }} · {{ selected.role || 'node' }}</span>
         <p class="detail-row" *ngIf="selected.platform"><strong>Platform</strong> {{ selected.platform }}</p>
+        <p class="detail-row" *ngIf="selected.entityType"><strong>Entity type</strong> {{ selected.entityType }}</p>
+        <p class="detail-row" *ngIf="selected.eventType"><strong>Event type</strong> {{ selected.eventType }}</p>
+        <p class="detail-row" *ngIf="selected.status"><strong>Status</strong> {{ selected.status }}</p>
+        <p class="detail-row" *ngIf="selected.confidence != null"><strong>Confidence</strong> {{ selected.confidence }}</p>
+        <p class="detail-row" *ngIf="selected.precision"><strong>Date precision</strong> {{ selected.precision }}</p>
+        <p class="detail-row" *ngIf="selected.location"><strong>Location</strong> {{ selected.location }}</p>
+        <p class="detail-row" *ngIf="selected.lineage"><strong>Lineage</strong> {{ selected.lineage }}</p>
         <p class="detail-row" *ngIf="selected.title"><strong>Finding</strong> {{ selected.title }}</p>
         <p class="detail-row" *ngIf="selected.source"><strong>Source</strong> {{ selected.source }}</p>
         <p class="detail-row" *ngIf="selected.verification"><strong>Verification</strong> {{ selected.verification }}</p>
         <p class="detail-row" *ngIf="selected.reason"><strong>Reason</strong> {{ selected.reason }}</p>
+        <p class="detail-row" *ngIf="selected.evidenceIds?.length"><strong>Evidence IDs</strong> {{ selected.evidenceIds.join(', ') }}</p>
         <p class="detail-row" *ngIf="selected.risk">
           <strong>Risk</strong>
           <span class="risk-badge" [class]="'risk-' + selected.risk">{{ selected.risk }}</span>
         </p>
         <p class="detail-row snippet" *ngIf="selected.snippet">{{ selected.snippet }}</p>
         <p class="detail-row snippet" *ngIf="selected.description && !selected.snippet">{{ selected.description }}</p>
+        <div class="nav-links" *ngIf="scanId">
+          <a class="btn-secondary" [routerLink]="['/scan', scanId]">Open Timeline / Journal</a>
+        </div>
         <a *ngIf="selected.url" class="btn-primary open-link" [href]="selected.url" target="_blank" rel="noopener">
           <mat-icon>open_in_new</mat-icon> Open in new tab
         </a>
@@ -118,6 +149,12 @@ interface NodeDetail {
     .dot.user { background: #388bfd; }
     .dot.profile { background: #3fb950; }
     .dot.corr { background: #a371f7; }
+    .dot.entity { background: #39d353; }
+    .dot.event { background: #58a6ff; }
+    .dot.hyp { background: #d2a8ff; }
+    .dot.cluster { background: #f0883e; }
+    .chk { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--cm-muted); font-size: 0.85rem; }
+    .nav-links { margin: 0.75rem 0; }
     .detail-panel { padding: 1rem 1.25rem; min-height: 200px; position: sticky; top: 1rem; }
     .detail-panel.empty { text-align: center; color: var(--cm-muted); padding: 2rem 1rem; }
     .detail-panel.empty mat-icon { font-size: 40px; width: 40px; height: 40px; opacity: 0.5; }
@@ -147,6 +184,8 @@ export class GraphComponent implements OnInit, OnDestroy {
   riskFilter = '';
   verificationFilter = '';
   sourceFilter = '';
+  nodeTypeFilter = '';
+  hideMirrors = true;
   sourceOptions: string[] = [];
   selected: NodeDetail | null = null;
   private cy?: Core;
@@ -180,10 +219,19 @@ export class GraphComponent implements OnInit, OnDestroy {
 
   applyFilter() {
     if (!this.rawGraph) return;
-    let data = this.rawGraph;
+    const data = this.rawGraph;
     const evidenceTypes = new Set(['Finding', 'PublicProfile', 'Correlation']);
-    let nodes = data.nodes as any[];
+    let nodes = [...(data.nodes as any[])];
 
+    if (this.hideMirrors) {
+      nodes = nodes.filter((n: any) => !n.data?.is_mirror);
+    }
+    if (this.nodeTypeFilter) {
+      const keepSeed = new Set(['Person', 'Email', 'Username', 'Phone', 'Website', 'Location']);
+      nodes = nodes.filter(
+        (n: any) => n.type === this.nodeTypeFilter || keepSeed.has(n.type)
+      );
+    }
     if (this.riskFilter) {
       const allowed = new Set(
         nodes
@@ -197,13 +245,15 @@ export class GraphComponent implements OnInit, OnDestroy {
         (n: any) =>
           !evidenceTypes.has(n.type) ||
           n.data?.role === 'derived' ||
-          n.type === 'Correlation'
+          n.type === 'Correlation' ||
+          n.type === 'Hypothesis'
       );
     } else if (this.verificationFilter) {
       nodes = nodes.filter(
         (n: any) =>
-          !evidenceTypes.has(n.type) ||
-          n.data?.verification === this.verificationFilter
+          (!evidenceTypes.has(n.type) && n.type !== 'Hypothesis') ||
+          n.data?.verification === this.verificationFilter ||
+          n.data?.status === this.verificationFilter
       );
     }
     if (this.sourceFilter) {
@@ -231,7 +281,7 @@ export class GraphComponent implements OnInit, OnDestroy {
       id: d.id,
       label: d.label,
       type: d.type,
-      url: d.url,
+      url: d.url || d.source_url,
       title: d.title,
       snippet: d.snippet,
       description: d.description,
@@ -241,7 +291,15 @@ export class GraphComponent implements OnInit, OnDestroy {
       category: d.category,
       verification: d.verification,
       role: d.role,
-      reason: d.reason,
+      reason: d.reason || (Array.isArray(d.reasons) ? d.reasons.join(' · ') : ''),
+      entityType: d.entity_type,
+      eventType: d.event_type,
+      status: d.status,
+      confidence: d.confidence,
+      precision: d.precision,
+      location: d.location,
+      lineage: d.lineage || d.lineage_type,
+      evidenceIds: d.evidence_ids || d.evidenceIds,
     };
   }
 
@@ -257,6 +315,8 @@ export class GraphComponent implements OnInit, OnDestroy {
       Person: '#ffa657', Email: '#ff6b6b', Username: '#388bfd',
       Phone: '#f0c040', Website: '#79c0ff', Location: '#8b949e',
       PublicProfile: '#3fb950', Finding: '#6e7681', Correlation: '#a371f7',
+      Entity: '#39d353', Event: '#58a6ff', Hypothesis: '#d2a8ff',
+      EvidenceCluster: '#f0883e', EvidenceArtifact: '#7ee787',
     };
 
     const elements = [
