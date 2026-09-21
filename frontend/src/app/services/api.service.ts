@@ -110,6 +110,12 @@ export class ApiService {
   }
   dashboard(id: string): Observable<any> { return this.http.get(`${API}/scans/${id}/dashboard`); }
   graph(id: string): Observable<any> { return this.http.get(`${API}/scans/${id}/graph`); }
+  intelligence(id: string, refresh = false): Observable<any> {
+    return this.http.get(`${API}/scans/${id}/intelligence`, { params: { refresh } });
+  }
+  timeline(id: string): Observable<any> { return this.http.get(`${API}/scans/${id}/timeline`); }
+  journal(id: string): Observable<any> { return this.http.get(`${API}/scans/${id}/journal`); }
+  deleteArtifacts(id: string): Observable<any> { return this.http.delete(`${API}/scans/${id}/artifacts`); }
 
   export(id: string, format: string): Observable<ExportResponse> {
     return this.http.post<ExportResponse>(`${API}/scans/${id}/export`, { format });

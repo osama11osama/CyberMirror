@@ -236,8 +236,8 @@ export class AppComponent implements OnInit {
   unlockDraft = '';
   unlockError = '';
   unlockBusy = false;
-  appVersion = '2.4.0';
-  releaseName = 'Correlation';
+  appVersion = '2.5.0';
+  releaseName = 'Deep Intelligence';
 
   constructor(private api: ApiService) {}
 

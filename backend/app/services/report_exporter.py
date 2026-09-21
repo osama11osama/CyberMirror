@@ -39,13 +39,24 @@ def _finding_link(finding: Finding) -> str:
     return title
 
 
-def export_json(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
+def export_json(
+    scan: ScanSummary,
+    findings: list[Finding],
+    path: Path,
+    *,
+    intelligence: dict | None = None,
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "scan": scan.model_dump(mode="json"),
         "findings": [f.model_dump(mode="json") for f in findings],
         "exported_at": utc_now_iso(),
     }
+    if intelligence:
+        from app.services.intelligence_report import build_intelligence_summary
+
+        data["intelligence"] = intelligence
+        data["intelligence_summary"] = build_intelligence_summary(intelligence)
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -64,7 +75,13 @@ def export_csv(findings: list[Finding], path: Path) -> Path:
     return path
 
 
-def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
+def export_html(
+    scan: ScanSummary,
+    findings: list[Finding],
+    path: Path,
+    *,
+    intelligence: dict | None = None,
+) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = ""
     for f in findings:
@@ -77,6 +94,12 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
           <td>{_html(f.risk_reason)}</td>
           <td>{_html(f.recommendation)}</td>
         </tr>"""
+
+    intel_html = ""
+    if intelligence:
+        from app.services.intelligence_report import intelligence_html_section
+
+        intel_html = intelligence_html_section(intelligence)
 
     markup = f"""<!DOCTYPE html>
 <html lang="en">
@@ -92,6 +115,7 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
     tr:nth-child(even) {{ background: #161b22; }}
     .Critical {{ color: #ff6b6b; }} .High {{ color: #ffa657; }}
     .Medium {{ color: #f0c040; }} .Low {{ color: #3fb950; }}
+    .intelligence-report {{ margin-top: 2rem; border-top: 1px solid #30363d; padding-top: 1rem; }}
   </style>
 </head>
 <body>
@@ -106,6 +130,7 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
     </tr></thead>
     <tbody>{rows}</tbody>
   </table>
+  {intel_html}
   <footer style="margin-top:2rem;color:#8b949e;">
     For personal self-audit only. Data stays local.
   </footer>
@@ -115,11 +140,17 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
     return path
 
 
-def export_pdf(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
+def export_pdf(
+    scan: ScanSummary,
+    findings: list[Finding],
+    path: Path,
+    *,
+    intelligence: dict | None = None,
+) -> Path:
     """Generate real PDF from HTML report."""
     path.parent.mkdir(parents=True, exist_ok=True)
     html_path = path.with_suffix(".html")
-    export_html(scan, findings, html_path)
+    export_html(scan, findings, html_path, intelligence=intelligence)
     html = html_path.read_text(encoding="utf-8")
     try:
         from xhtml2pdf import pisa
