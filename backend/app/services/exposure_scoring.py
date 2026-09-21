@@ -75,7 +75,27 @@ def _dedupe_key(finding: Finding) -> str:
     return f"plat:{(finding.platform or '').lower()}|{(finding.title or '')[:60].lower()}"
 
 
+def _is_derived_finding(finding: Finding) -> bool:
+    if finding.source == "identity_correlator":
+        return True
+    if finding.platform == "Correlation Engine":
+        return True
+    evidence = finding.evidence
+    if evidence is not None and getattr(evidence, "kind", None) is not None:
+        kind = evidence.kind
+        value = kind.value if hasattr(kind, "value") else str(kind)
+        if value == "derived":
+            return True
+    raw = finding.raw or {}
+    # Any conclusion that cites other findings is not an independent observation.
+    if raw.get("supporting_finding_ids"):
+        return True
+    return False
+
+
 def _is_exposure_candidate(finding: Finding) -> bool:
+    if _is_derived_finding(finding):
+        return False
     outcome = _outcome_of(finding)
     if outcome in (
         FindingOutcome.NEGATIVE,

@@ -89,3 +89,35 @@ def test_blocked_observation_is_weak_link_not_corroboration():
     graph = build_graph(profile, findings)
     assert not any(n.id.startswith("corr-handle:") for n in graph.nodes)
     assert any(e.label == "weak / unverified" for e in graph.edges)
+
+
+def test_generic_web_paths_do_not_invent_shared_handles():
+    """Unrelated /articles/... pages must not yield Handle @articles."""
+    profile = IdentityProfile(username="jane")
+    findings = [
+        Finding(
+            id="w1",
+            platform="NewsA",
+            url="https://site-a.example/articles/foo",
+            title="Article A",
+            category=FindingCategory.IDENTITY,
+            source="web_search",
+            outcome=FindingOutcome.CONFIRMED,
+            verification=VerificationState.VERIFIED,
+            risk_level=RiskLevel.MEDIUM,
+        ),
+        Finding(
+            id="w2",
+            platform="NewsB",
+            url="https://site-b.example/articles/bar",
+            title="Article B",
+            category=FindingCategory.IDENTITY,
+            source="web_search",
+            outcome=FindingOutcome.CONFIRMED,
+            verification=VerificationState.VERIFIED,
+            risk_level=RiskLevel.MEDIUM,
+        ),
+    ]
+    graph = build_graph(profile, findings)
+    assert not any(n.id.startswith("corr-handle:") for n in graph.nodes)
+    assert not any(n.type == "Handle" and "articles" in (n.label or "").lower() for n in graph.nodes)
