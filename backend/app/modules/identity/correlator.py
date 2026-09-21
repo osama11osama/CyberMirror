@@ -45,13 +45,37 @@ def _blob(finding: Finding) -> str:
     return f"{finding.title} {finding.snippet} {finding.url}".lower()
 
 
+_WEAK_VERIFICATION = {
+    VerificationState.POSSIBLE,
+    VerificationState.BLOCKED,
+    VerificationState.INCONCLUSIVE,
+    VerificationState.NOT_FOUND,
+    VerificationState.ERROR,
+}
+
+
+def _is_correlation_evidence(finding: Finding) -> bool:
+    """Only verified/likely (or legacy unknown) observations feed confirmed correlations."""
+    if finding.platform in ("Summary", "System", "Correlation Engine"):
+        return False
+    if finding.outcome in (
+        FindingOutcome.NEGATIVE,
+        FindingOutcome.SYSTEM,
+        FindingOutcome.INCONCLUSIVE,
+    ):
+        return False
+    if finding.verification in _WEAK_VERIFICATION:
+        return False
+    return True
+
+
 def _mentions(finding: Finding, *needles: str) -> bool:
     text = _blob(finding)
     return all(n and n.lower() in text for n in needles)
 
 
 def _supporting(existing: list[Finding], *needles: str) -> list[Finding]:
-    return [f for f in existing if _mentions(f, *needles)]
+    return [f for f in existing if _is_correlation_evidence(f) and _mentions(f, *needles)]
 
 
 def correlate_findings(
@@ -59,17 +83,16 @@ def correlate_findings(
     existing: list[Finding],
     scan_id: str = "",
 ) -> list[Finding]:
-    """Build correlations from observed findings only — never from seed inputs alone."""
+    """Build correlations from credible observed findings only — never from seed inputs alone."""
     findings: list[Finding] = []
-    if not existing:
+    credible = [f for f in existing if _is_correlation_evidence(f)]
+    if not credible:
         return findings
 
     by_platform: dict[str, list[Finding]] = defaultdict(list)
     handle_platforms: dict[str, set[str]] = defaultdict(set)
 
-    for f in existing:
-        if f.platform in ("Summary", "System", "Correlation Engine"):
-            continue
+    for f in credible:
         by_platform[f.platform].append(f)
         handle = _extract_handle(f.url)
         if handle:
@@ -79,7 +102,7 @@ def correlate_findings(
 
     # Evidence-backed seed-field pairs: only when a public finding links both values.
     if profile.full_name and profile.username:
-        support = _supporting(existing, profile.full_name, profile.username)
+        support = _supporting(credible, profile.full_name, profile.username)
         if support:
             findings.append(_corr(
                 scan_id,
@@ -90,7 +113,7 @@ def correlate_findings(
             ))
 
     if profile.email and profile.full_name:
-        support = _supporting(existing, profile.email, profile.full_name)
+        support = _supporting(credible, profile.email, profile.full_name)
         if support:
             findings.append(_corr(
                 scan_id,
@@ -101,7 +124,7 @@ def correlate_findings(
             ))
 
     if profile.phone and profile.location:
-        support = _supporting(existing, profile.phone, profile.location)
+        support = _supporting(credible, profile.phone, profile.location)
         if support:
             findings.append(_corr(
                 scan_id,
@@ -124,17 +147,20 @@ def correlate_findings(
             description=f"Platforms: {', '.join(sorted(real_platforms)[:15])}",
             confidence=0.9,
             outcome=FindingOutcome.CONFIRMED,
+            verification=VerificationState.LIKELY,
             raw={
                 "outcome": FindingOutcome.CONFIRMED.value,
+                "verification": VerificationState.LIKELY.value,
                 "supporting_finding_ids": [f.id for f in support[:50]],
                 "platforms": sorted(real_platforms),
+                "evidence_backed": True,
             },
         ))
 
     for handle, platforms in handle_platforms.items():
         if len(platforms) >= 3 and handle != "www":
             support = [
-                f for f in existing
+                f for f in credible
                 if _extract_handle(f.url) == handle
                 or (profile.username and profile.username.lower() == handle and handle in _blob(f))
             ]
@@ -148,14 +174,17 @@ def correlate_findings(
                 description=f"Same URL handle on: {', '.join(sorted(platforms)[:10])}",
                 confidence=0.87,
                 outcome=FindingOutcome.CONFIRMED,
+                verification=VerificationState.LIKELY,
                 raw={
                     "outcome": FindingOutcome.CONFIRMED.value,
+                    "verification": VerificationState.LIKELY.value,
                     "supporting_finding_ids": [f.id for f in support[:50]],
                     "platforms": sorted(platforms),
+                    "evidence_backed": True,
                 },
             ))
 
-    high = [f for f in existing if f.risk_level.value in ("Critical", "High")]
+    high = [f for f in credible if f.risk_level.value in ("Critical", "High")]
     if len(high) >= 3:
         findings.append(Finding(
             scan_id=scan_id,
@@ -167,15 +196,18 @@ def correlate_findings(
             description="Multiple sensitive data points found publicly",
             confidence=0.95,
             outcome=FindingOutcome.CONFIRMED,
+            verification=VerificationState.LIKELY,
             raw={
                 "outcome": FindingOutcome.CONFIRMED.value,
+                "verification": VerificationState.LIKELY.value,
                 "supporting_finding_ids": [f.id for f in high[:50]],
+                "evidence_backed": True,
             },
         ))
 
     if profile.email:
         email_hits = [
-            f for f in existing
+            f for f in credible
             if profile.email.lower() in _blob(f)
         ]
         if len(email_hits) >= 2:
@@ -189,16 +221,19 @@ def correlate_findings(
                 description="Email widely indexed — consider alias addresses publicly",
                 confidence=0.88,
                 outcome=FindingOutcome.CONFIRMED,
+                verification=VerificationState.LIKELY,
                 raw={
                     "outcome": FindingOutcome.CONFIRMED.value,
+                    "verification": VerificationState.LIKELY.value,
                     "supporting_finding_ids": [f.id for f in email_hits[:50]],
+                    "evidence_backed": True,
                 },
             ))
 
     if profile.username:
         uname = re.escape(profile.username.lower())
         title_matches = [
-            f for f in existing
+            f for f in credible
             if re.search(rf"\b{uname}\b", f"{f.title} {f.snippet}".lower())
         ]
         if len(title_matches) >= 4:
@@ -212,9 +247,12 @@ def correlate_findings(
                 description="Consistent username reuse increases traceability",
                 confidence=0.85,
                 outcome=FindingOutcome.CONFIRMED,
+                verification=VerificationState.LIKELY,
                 raw={
                     "outcome": FindingOutcome.CONFIRMED.value,
+                    "verification": VerificationState.LIKELY.value,
                     "supporting_finding_ids": [f.id for f in title_matches[:50]],
+                    "evidence_backed": True,
                 },
             ))
 

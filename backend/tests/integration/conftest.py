@@ -25,8 +25,12 @@ def isolated_app(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "playwright_enabled", False)
 
     from app.services import crypto
+    from app.services import runtime_settings
 
     monkeypatch.setattr(crypto, "_KEY_FILE", tmp_path / ".encryption_key")
+    monkeypatch.setattr(
+        runtime_settings, "RUNTIME_FILE", tmp_path / "runtime_settings.json"
+    )
 
     settings.exports_dir.mkdir(parents=True, exist_ok=True)
     db.init_db()
