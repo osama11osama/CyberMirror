@@ -113,7 +113,13 @@ export class ApiService {
   intelligence(id: string, refresh = false): Observable<any> {
     return this.http.get(`${API}/scans/${id}/intelligence`, { params: { refresh } });
   }
-  timeline(id: string): Observable<any> { return this.http.get(`${API}/scans/${id}/timeline`); }
+  timeline(id: string, params: Record<string, string | number | boolean | null | undefined> = {}): Observable<any> {
+    const cleaned: Record<string, string | number | boolean> = {};
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== null && value !== undefined && value !== '') cleaned[key] = value;
+    }
+    return this.http.get(`${API}/scans/${id}/timeline`, { params: cleaned });
+  }
   journal(id: string): Observable<any> { return this.http.get(`${API}/scans/${id}/journal`); }
   deleteArtifacts(id: string): Observable<any> { return this.http.delete(`${API}/scans/${id}/artifacts`); }
 
