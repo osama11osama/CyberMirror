@@ -7,6 +7,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.services.timeutil import utc_now
+
 
 class RiskLevel(str, Enum):
     CRITICAL = "Critical"
@@ -75,7 +77,7 @@ class Finding(BaseModel):
     risk_reason: str = ""
     recommendation: str = ""
     outcome: FindingOutcome = FindingOutcome.UNKNOWN
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=utc_now)
     raw: dict[str, Any] = Field(default_factory=dict)
 
 

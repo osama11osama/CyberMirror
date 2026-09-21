@@ -7,6 +7,7 @@ import json
 from contextlib import asynccontextmanager
 
 from datetime import datetime
+from app.services.timeutil import parse_iso_datetime
 
 
 
@@ -89,6 +90,16 @@ async def lifespan(app):
     setup_logging()
 
     apply_runtime()
+
+    from app.storage.database import mark_orphaned_running_scans
+
+    orphaned = mark_orphaned_running_scans()
+    if orphaned:
+        import logging
+
+        logging.getLogger("cybermirror").info(
+            "Marked %s orphaned running scan(s) as failed after restart", orphaned
+        )
 
     start_scheduler()
 
@@ -385,7 +396,7 @@ def scan_detail(scan_id: str):
 
         id=row["id"],
 
-        created_at=datetime.fromisoformat(row["created_at"]),
+        created_at=parse_iso_datetime(row["created_at"]),
 
         profile=profile_from_row(row),
 
@@ -549,7 +560,7 @@ def export_scan(scan_id: str, body: ExportRequest):
 
         id=row["id"],
 
-        created_at=datetime.fromisoformat(row["created_at"]),
+        created_at=parse_iso_datetime(row["created_at"]),
 
         profile=profile_from_row(row),
 
@@ -617,7 +628,7 @@ def download_export(scan_id: str, format: str):
 
         id=row["id"],
 
-        created_at=datetime.fromisoformat(row["created_at"]),
+        created_at=parse_iso_datetime(row["created_at"]),
 
         profile=profile_from_row(row),
 

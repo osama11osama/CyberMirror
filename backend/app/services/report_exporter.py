@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.models.schemas import Finding, ScanSummary
+from app.services.timeutil import utc_now_iso
 
 _ALLOWED_HREF_SCHEMES = {"http", "https"}
 
@@ -43,7 +44,7 @@ def export_json(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
     data = {
         "scan": scan.model_dump(mode="json"),
         "findings": [f.model_dump(mode="json") for f in findings],
-        "exported_at": datetime.utcnow().isoformat(),
+        "exported_at": utc_now_iso(),
     }
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     return path
@@ -97,7 +98,7 @@ def export_html(scan: ScanSummary, findings: list[Finding], path: Path) -> Path:
   <h1>CyberMirror Self-Audit Report</h1>
   <p><strong>Slogan:</strong> See Yourself as the Internet Sees You</p>
   <p>Scan ID: {_html(scan.id)} | Risk Score: {_html(scan.risk_score)} | Findings: {_html(scan.finding_count)}</p>
-  <p>Generated: {_html(datetime.utcnow().isoformat())} UTC</p>
+  <p>Generated: {_html(utc_now_iso())} UTC</p>
   <table>
     <thead><tr>
       <th>Risk</th><th>Source</th><th>Platform</th><th>Finding</th>
