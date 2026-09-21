@@ -69,6 +69,13 @@ def _resolve_outcome(finding: Finding) -> FindingOutcome:
 def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
     combined = f"{finding.title} {finding.description} {finding.snippet} {finding.url}"
     outcome = _resolve_outcome(finding)
+    # Prefer explicit verification → outcome when scanners set it.
+    if finding.verification and finding.verification.value != "unknown":
+        from app.models.evidence import verification_to_outcome
+
+        mapped = verification_to_outcome(finding.verification)
+        if outcome == FindingOutcome.UNKNOWN or finding.outcome == FindingOutcome.UNKNOWN:
+            outcome = mapped
     finding.outcome = outcome
 
     if outcome == FindingOutcome.SYSTEM:

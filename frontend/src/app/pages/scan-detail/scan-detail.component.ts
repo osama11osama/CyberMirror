@@ -91,7 +91,7 @@ import { ApiService } from '../../services/api.service';
         <div class="table-wrap" *ngIf="filteredFindings.length">
           <table class="data-table">
             <thead>
-              <tr><th>Where</th><th>What</th><th>Source</th><th>Risk</th><th>Recommendation</th></tr>
+              <tr><th>Where</th><th>What</th><th>Source</th><th>Verify</th><th>Risk</th><th>Recommendation</th></tr>
             </thead>
             <tbody>
               <tr *ngFor="let f of filteredFindings">
@@ -105,6 +105,7 @@ import { ApiService } from '../../services/api.service';
                   <p class="snippet reason" *ngIf="f.risk_reason">{{ f.risk_reason }}</p>
                 </td>
                 <td>{{ f.source }}</td>
+                <td><span class="verify-badge">{{ f.verification || f.outcome || '—' }}</span></td>
                 <td><span class="risk-badge" [class]="'risk-' + f.risk_level">{{ f.risk_level }}</span></td>
                 <td class="rec">{{ f.recommendation || '—' }}</td>
               </tr>

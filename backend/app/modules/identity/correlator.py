@@ -5,6 +5,11 @@ from collections import defaultdict
 from urllib.parse import urlparse
 
 from app.models.schemas import Finding, FindingCategory, FindingOutcome, IdentityProfile
+from app.models.evidence import (
+    EvidenceKind,
+    EvidenceObservation,
+    VerificationState,
+)
 from app.modules.base import NativeModule
 
 
@@ -227,6 +232,18 @@ def _corr(
     sources = sorted({f.source or f.platform for f in support if f.source or f.platform})
     # Snippet carries only the correlated pair — never extra seed fields (e.g. location).
     snippet = " | ".join(part for part in pair if part)
+    support_ids = [f.id for f in support[:50]]
+    evidence = EvidenceObservation(
+        kind=EvidenceKind.DERIVED,
+        method="correlator",
+        queried_identifier=" | ".join(pair),
+        identifier_type="correlated_pair",
+        platform="Correlation Engine",
+        positive_markers=[s for s in sources[:8]],
+        confidence_reason="Multiple observed findings mention both identifiers",
+        corroborating_finding_ids=support_ids,
+        verification=VerificationState.LIKELY,
+    )
     return Finding(
         scan_id=scan_id,
         source="identity_correlator",
@@ -237,10 +254,13 @@ def _corr(
         description=f"{desc} Supporting sources: {', '.join(sources[:8]) or 'observed findings'}.",
         confidence=0.9,
         outcome=FindingOutcome.CONFIRMED,
+        verification=VerificationState.LIKELY,
+        evidence=evidence,
         snippet=snippet,
         raw={
             "outcome": FindingOutcome.CONFIRMED.value,
-            "supporting_finding_ids": [f.id for f in support[:50]],
+            "verification": VerificationState.LIKELY.value,
+            "supporting_finding_ids": support_ids,
             "supporting_sources": sources[:20],
             "evidence_backed": True,
         },

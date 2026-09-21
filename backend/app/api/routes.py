@@ -134,6 +134,8 @@ def health():
 
         "version": settings.app_version,
 
+        "release_name": settings.app_release_name,
+
         "engine": "CyberMirror Native",
 
         "slogan": "See Yourself as the Internet Sees You",

@@ -38,6 +38,14 @@ class FindingOutcome(str, Enum):
     UNKNOWN = "unknown"
 
 
+# Re-export verification/evidence for convenience (defined in evidence.py to avoid cycles).
+from app.models.evidence import (  # noqa: E402
+    EvidenceKind,
+    EvidenceObservation,
+    VerificationState,
+)
+
+
 class IdentityProfile(BaseModel):
     full_name: str = ""
     username: str = ""
@@ -77,6 +85,8 @@ class Finding(BaseModel):
     risk_reason: str = ""
     recommendation: str = ""
     outcome: FindingOutcome = FindingOutcome.UNKNOWN
+    verification: VerificationState = VerificationState.UNKNOWN
+    evidence: EvidenceObservation | None = None
     timestamp: datetime = Field(default_factory=utc_now)
     raw: dict[str, Any] = Field(default_factory=dict)
 
