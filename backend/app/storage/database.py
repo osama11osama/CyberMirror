@@ -119,6 +119,24 @@ def update_scan_status(
         conn.commit()
 
 
+def sync_risk_score(scan_id: str, findings: list[Finding], stored: float | None = None) -> float:
+    """Recompute evidence-aware score and persist when it drifts from storage.
+
+    Keeps History / trends / exports aligned with scan-detail for pre-v2.4 rows.
+    """
+    from app.services.exposure_scoring import compute_risk_score
+
+    score = float(compute_risk_score(findings))
+    if stored is None or abs(float(stored) - score) > 0.05:
+        with _connect() as conn:
+            conn.execute(
+                "UPDATE scans SET risk_score=? WHERE id=?",
+                (score, scan_id),
+            )
+            conn.commit()
+    return score
+
+
 def _finding_raw_payload(f: Finding) -> dict:
     payload = {**(f.raw or {}), "outcome": f.outcome.value}
     if f.verification:
@@ -164,12 +182,33 @@ def save_findings(findings: list[Finding]) -> None:
 
 
 def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
+    from app.services.exposure_scoring import compute_risk_score
+
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM scans ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
-    return [_row_to_summary(r) for r in rows]
+        out: list[ScanSummary] = []
+        dirty: list[tuple[float, str]] = []
+        for r in rows:
+            finding_rows = conn.execute(
+                "SELECT * FROM findings WHERE scan_id=? ORDER BY timestamp",
+                (r["id"],),
+            ).fetchall()
+            findings = [row_to_finding(dict(f)) for f in finding_rows]
+            score = float(compute_risk_score(findings))
+            stored = float(r["risk_score"] or 0)
+            if abs(stored - score) > 0.05:
+                dirty.append((score, r["id"]))
+            out.append(_row_to_summary(r, risk_score=score))
+        if dirty:
+            conn.executemany(
+                "UPDATE scans SET risk_score=? WHERE id=?",
+                dirty,
+            )
+            conn.commit()
+    return out
 
 
 def count_scans() -> int:
@@ -206,7 +245,7 @@ def get_scan(scan_id: str) -> dict | None:
     return {"scan": dict(row), "findings": [dict(f) for f in findings]}
 
 
-def _row_to_summary(row: sqlite3.Row) -> ScanSummary:
+def _row_to_summary(row: sqlite3.Row, *, risk_score: float | None = None) -> ScanSummary:
     return ScanSummary(
         id=row["id"],
         created_at=parse_iso_datetime(row["created_at"]),
@@ -214,7 +253,7 @@ def _row_to_summary(row: sqlite3.Row) -> ScanSummary:
         status=row["status"],
         providers=json.loads(row["providers"]),
         finding_count=row["finding_count"],
-        risk_score=row["risk_score"],
+        risk_score=float(row["risk_score"] if risk_score is None else risk_score),
     )
 
 
@@ -304,7 +343,9 @@ def compare_scans(scan_a: str, scan_b: str):
 
 
 def risk_trends(limit: int = 20) -> list[dict]:
-    """Recent scans for dashboard trend chart."""
+    """Recent scans for dashboard trend chart (live evidence-aware scores)."""
+    from app.services.exposure_scoring import compute_risk_score
+
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -314,13 +355,31 @@ def risk_trends(limit: int = 20) -> list[dict]:
             """,
             (limit,),
         ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "created_at": r["created_at"],
-            "risk_score": r["risk_score"],
-            "finding_count": r["finding_count"],
-            "status": r["status"],
-        }
-        for r in reversed(rows)
-    ]
+        out: list[dict] = []
+        dirty: list[tuple[float, str]] = []
+        for r in rows:
+            finding_rows = conn.execute(
+                "SELECT * FROM findings WHERE scan_id=? ORDER BY timestamp",
+                (r["id"],),
+            ).fetchall()
+            findings = [row_to_finding(dict(f)) for f in finding_rows]
+            score = float(compute_risk_score(findings))
+            stored = float(r["risk_score"] or 0)
+            if abs(stored - score) > 0.05:
+                dirty.append((score, r["id"]))
+            out.append(
+                {
+                    "id": r["id"],
+                    "created_at": r["created_at"],
+                    "risk_score": score,
+                    "finding_count": r["finding_count"],
+                    "status": r["status"],
+                }
+            )
+        if dirty:
+            conn.executemany(
+                "UPDATE scans SET risk_score=? WHERE id=?",
+                dirty,
+            )
+            conn.commit()
+    return list(reversed(out))

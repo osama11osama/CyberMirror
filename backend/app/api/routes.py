@@ -70,6 +70,7 @@ from app.storage.database import (
     profile_from_row,
     risk_trends,
     row_to_finding,
+    sync_risk_score,
 )
 from app.modules.username.wmn_loader import wmn_status
 
@@ -397,6 +398,8 @@ def scan_detail(scan_id: str):
     from app.services.exposure_scoring import compute_exposure_score
 
     explanation = compute_exposure_score(findings).as_dict()
+    score = sync_risk_score(row["id"], findings, stored=row["risk_score"])
+    explanation["score"] = score
 
     # Detail view always uses the live evidence-aware score so the number and
     # explanation stay consistent (legacy arithmetic-mean rows are recomputed here).
@@ -414,7 +417,7 @@ def scan_detail(scan_id: str):
 
         finding_count=row["finding_count"],
 
-        risk_score=explanation["score"],
+        risk_score=score,
 
         findings=findings,
 
@@ -530,11 +533,13 @@ def scan_dashboard(scan_id: str):
 
     row = data["scan"]
 
+    score = sync_risk_score(row["id"], findings, stored=row["risk_score"])
+
     return DashboardStats(
 
         total_findings=len(findings),
 
-        risk_score=row["risk_score"],
+        risk_score=score,
 
         by_source=by_source,
 
@@ -566,6 +571,8 @@ def export_scan(scan_id: str, body: ExportRequest):
 
     findings = [row_to_finding(f) for f in data["findings"]]
 
+    score = sync_risk_score(row["id"], findings, stored=row["risk_score"])
+
     summary = ScanSummary(
 
         id=row["id"],
@@ -580,7 +587,7 @@ def export_scan(scan_id: str, body: ExportRequest):
 
         finding_count=row["finding_count"],
 
-        risk_score=row["risk_score"],
+        risk_score=score,
 
     )
 
@@ -634,6 +641,8 @@ def download_export(scan_id: str, format: str):
 
     findings = [row_to_finding(f) for f in data["findings"]]
 
+    score = sync_risk_score(row["id"], findings, stored=row["risk_score"])
+
     summary = ScanSummary(
 
         id=row["id"],
@@ -648,7 +657,7 @@ def download_export(scan_id: str, format: str):
 
         finding_count=row["finding_count"],
 
-        risk_score=row["risk_score"],
+        risk_score=score,
 
     )
 

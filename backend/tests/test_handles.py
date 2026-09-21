@@ -26,3 +26,17 @@ def test_unknown_host_requires_seed_username_match():
         "https://blog.example/other", expected_username="jane"
     ) is None
     assert extract_profile_handle("https://blog.example/jane") is None
+
+
+def test_required_profile_prefix_must_match():
+    """Hosts with configured prefixes must not treat routing segments as handles."""
+    assert extract_profile_handle("https://linkedin.com/groups/123") is None
+    assert extract_profile_handle("https://www.linkedin.com/company/acme") is None
+    assert extract_profile_handle("https://reddit.com/r/osint") is None
+    assert extract_profile_handle("https://tiktok.com/foryou") is None
+    assert extract_profile_handle("https://medium.com/tag/security") is None
+    assert extract_profile_handle("https://facebook.com/groups/abc") is None
+    # Valid prefixed profiles still work
+    assert extract_profile_handle("https://linkedin.com/in/jane") == "jane"
+    assert extract_profile_handle("https://reddit.com/u/jane") == "jane"
+    assert extract_profile_handle("https://medium.com/@jane") == "jane"
