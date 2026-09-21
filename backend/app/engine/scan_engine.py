@@ -96,7 +96,7 @@ class ScanEngine:
             budget = get_budget(scan_id)
             if budget is not None:
                 update_job(scan_id, investigation_budget=budget.as_dict())
-            clear_budget(scan_id)
+            clear_budget(scan_id, expected=budget)
 
     async def run_scan(
         self, profile: IdentityProfile, modules: list[str] | None = None

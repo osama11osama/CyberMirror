@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -42,6 +44,16 @@ class PageArtifact(BaseModel):
     blocked_reason: str | None = None
     evidence_id: str = ""
     scan_id: str = ""
+
+
+@dataclass(frozen=True)
+class _BoundedResponse:
+    status_code: int
+    url: str
+    headers: dict[str, str]
+    body: str
+    is_redirect: bool
+    truncated: bool = False
 
 
 _LOGIN_MARKERS = (
@@ -215,12 +227,7 @@ async def acquire_page(
                 scan_id=scan_id,
             )
         if budget.is_cancelled():
-            return PageArtifact(
-                source_url=url,
-                acquisition_method=AcquisitionMethod.UNSUPPORTED,
-                blocked_reason="cancelled",
-                scan_id=scan_id,
-            )
+            return _cancelled_artifact(url, scan_id=scan_id)
 
     timeout = budget.page_timeout_seconds if budget else 20.0
     try:
@@ -233,10 +240,18 @@ async def acquire_page(
         ) as client:
             request_url = url
             redirect_count = 0
+            deadline = asyncio.get_running_loop().time() + timeout
+            max_body_bytes = budget.max_extracted_content_bytes if budget else 400_000
             while True:
                 if budget and budget.is_cancelled():
                     return _cancelled_artifact(url, scan_id=scan_id)
-                resp = await client.get(request_url)
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError("page acquisition deadline exceeded")
+                resp = await asyncio.wait_for(
+                    _bounded_get(client, request_url, max_body_bytes),
+                    timeout=remaining,
+                )
                 if not resp.is_redirect:
                     break
                 redirect_count += 1
@@ -247,8 +262,14 @@ async def acquire_page(
                         scan_id=scan_id,
                     )
                 location = resp.headers.get("location", "")
-                next_url = urljoin(str(resp.url), location)
-                redirect_validation = await validate_public_target_async(next_url)
+                next_url = urljoin(resp.url, location)
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise TimeoutError("page acquisition deadline exceeded")
+                redirect_validation = await asyncio.wait_for(
+                    validate_public_target_async(next_url),
+                    timeout=remaining,
+                )
                 if not redirect_validation.allowed:
                     return _rejected_artifact(
                         url,
@@ -268,16 +289,18 @@ async def acquire_page(
                             scan_id=scan_id,
                         )
                 request_url = next_url
-            body = resp.text or ""
+            body = resp.body
             art = artifact_from_http(
                 source_url=url,
                 body=body,
                 status=resp.status_code,
-                final_url=str(resp.url),
+                final_url=resp.url,
                 title=title,
                 scan_id=scan_id,
                 budget=budget,
             )
+            if resp.truncated:
+                art.metadata["content_truncated"] = True
         if art.acquisition_method in (AcquisitionMethod.BLOCKED, AcquisitionMethod.ERROR) and snippet_fallback:
             return artifact_from_snippet(
                 source_url=url,
@@ -327,6 +350,37 @@ async def acquire_page(
             reason=f"request_error:{type(exc).__name__}",
             verification=VerificationState.ERROR,
             scan_id=scan_id,
+        )
+
+
+async def _bounded_get(client: Any, url: str, max_bytes: int) -> _BoundedResponse:
+    """Read at most ``max_bytes`` from an untrusted response body."""
+    chunks = bytearray()
+    truncated = False
+    async with client.stream("GET", url) as response:
+        is_redirect = response.status_code in {301, 302, 303, 307, 308}
+        if not is_redirect:
+            async for chunk in response.aiter_bytes():
+                remaining = max_bytes - len(chunks)
+                if remaining <= 0:
+                    truncated = True
+                    break
+                chunks.extend(chunk[:remaining])
+                if len(chunk) > remaining:
+                    truncated = True
+                    break
+        encoding = response.encoding or "utf-8"
+        try:
+            body = bytes(chunks).decode(encoding, errors="replace")
+        except LookupError:
+            body = bytes(chunks).decode("utf-8", errors="replace")
+        return _BoundedResponse(
+            status_code=response.status_code,
+            url=str(response.url),
+            headers=dict(response.headers),
+            body=body,
+            is_redirect=is_redirect,
+            truncated=truncated,
         )
 
 
