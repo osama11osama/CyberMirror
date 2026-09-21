@@ -164,8 +164,21 @@ def get_budget(scan_id: str) -> InvestigationBudget | None:
         return _budgets.get(scan_id)
 
 
-def clear_budget(scan_id: str) -> None:
+def claim_budget(scan_id: str) -> InvestigationBudget | None:
+    """Atomically register a new budget, or return None when one is active."""
     with _budgets_lock:
+        if scan_id in _budgets:
+            return None
+        budget = InvestigationBudget(scan_id=scan_id)
+        _budgets[scan_id] = budget
+        return budget
+
+
+def clear_budget(scan_id: str, expected: InvestigationBudget | None = None) -> None:
+    """Clear a registry entry only when it belongs to the expected owner."""
+    with _budgets_lock:
+        if expected is not None and _budgets.get(scan_id) is not expected:
+            return
         _budgets.pop(scan_id, None)
 
 
