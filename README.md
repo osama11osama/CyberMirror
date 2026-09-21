@@ -198,12 +198,16 @@ CyberMirror/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, Docker, PR expectations, privacy rules, and how to add scanners.
 
+Current release: **v2.3.0 “Evidence”** — verification states, structured provenance, expanded integration tests.
+
 Backend tests:
 
 ```bash
 cd backend
 python -m pytest tests/ -q
 ```
+
+Integration tests live under `backend/tests/integration/` and run with the same command (isolated temp databases; no live OSINT).
 
 Frontend build:
 

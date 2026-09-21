@@ -119,6 +119,15 @@ def update_scan_status(
         conn.commit()
 
 
+def _finding_raw_payload(f: Finding) -> dict:
+    payload = {**(f.raw or {}), "outcome": f.outcome.value}
+    if f.verification:
+        payload["verification"] = f.verification.value
+    if f.evidence is not None:
+        payload["evidence"] = f.evidence.model_dump(mode="json")
+    return payload
+
+
 def save_findings(findings: list[Finding]) -> None:
     with _connect() as conn:
         conn.executemany(
@@ -146,7 +155,7 @@ def save_findings(findings: list[Finding]) -> None:
                     f.risk_reason,
                     f.recommendation,
                     to_iso(f.timestamp),
-                    json.dumps({**(f.raw or {}), "outcome": f.outcome.value}),
+                    json.dumps(_finding_raw_payload(f)),
                 )
                 for f in findings
             ],
@@ -210,6 +219,7 @@ def _row_to_summary(row: sqlite3.Row) -> ScanSummary:
 
 
 def row_to_finding(row: dict) -> Finding:
+    from app.models.evidence import EvidenceObservation, VerificationState
     from app.models.schemas import FindingCategory, FindingOutcome, RiskLevel
 
     raw = json.loads(row["raw_json"] or "{}")
@@ -220,6 +230,24 @@ def row_to_finding(row: dict) -> Finding:
             outcome = FindingOutcome(raw_outcome)
         except ValueError:
             outcome = FindingOutcome.UNKNOWN
+
+    verification = VerificationState.UNKNOWN
+    raw_verification = raw.get("verification")
+    if isinstance(raw_verification, str):
+        try:
+            verification = VerificationState(raw_verification)
+        except ValueError:
+            verification = VerificationState.UNKNOWN
+
+    evidence = None
+    raw_evidence = raw.get("evidence")
+    if isinstance(raw_evidence, dict):
+        try:
+            evidence = EvidenceObservation.model_validate(raw_evidence)
+            if verification == VerificationState.UNKNOWN and evidence.verification:
+                verification = evidence.verification
+        except Exception:
+            evidence = None
 
     return Finding(
         id=row["id"],
@@ -237,6 +265,8 @@ def row_to_finding(row: dict) -> Finding:
         risk_reason=row["risk_reason"] or "",
         recommendation=row["recommendation"] or "",
         outcome=outcome,
+        verification=verification,
+        evidence=evidence,
         timestamp=parse_iso_datetime(row["timestamp"]),
         raw=raw,
     )

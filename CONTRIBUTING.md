@@ -60,7 +60,9 @@ cd backend && python -m pytest tests/ -q
 cd frontend && npm ci && npm run build
 ```
 
-GitHub Actions runs repository hygiene, backend pytest, frontend build, and a Docker smoke check.
+Integration coverage lives in `backend/tests/integration/` (temp DB, mocked scanners, export/auth/encryption). Do not add uncontrolled live OSINT calls to CI tests.
+
+Evidence/provenance model: [docs/evidence-model.md](docs/evidence-model.md).
 
 ## Code map
 

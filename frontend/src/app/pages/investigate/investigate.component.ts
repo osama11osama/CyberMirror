@@ -248,7 +248,7 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
 
             <thead>
 
-              <tr><th>Where</th><th>What</th><th>Source</th><th>Risk</th><th>Recommendation</th></tr>
+              <tr><th>Where</th><th>What</th><th>Source</th><th>Verify</th><th>Risk</th><th>Recommendation</th></tr>
 
             </thead>
 
@@ -275,6 +275,8 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
                 </td>
 
                 <td>{{ f.source }}</td>
+
+                <td><span class="verify-badge">{{ f.verification || f.outcome || '—' }}</span></td>
 
                 <td><span class="risk-badge" [class]="'risk-' + f.risk_level">{{ f.risk_level }}</span></td>
 

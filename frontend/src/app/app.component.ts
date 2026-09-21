@@ -85,7 +85,7 @@ import { getApiToken, storeApiToken } from './services/auth.interceptor';
               <span class="dot"></span>
               {{ backendOk ? 'Backend connected' : 'Backend offline' }}
             </div>
-            <small>Native Engine · v2.1.0</small>
+            <small>Native Engine · v{{ appVersion }} · {{ releaseName }}</small>
           </div>
         </mat-sidenav>
 
@@ -236,6 +236,8 @@ export class AppComponent implements OnInit {
   unlockDraft = '';
   unlockError = '';
   unlockBusy = false;
+  appVersion = '2.3.0';
+  releaseName = 'Evidence';
 
   constructor(private api: ApiService) {}
 
@@ -249,6 +251,8 @@ export class AppComponent implements OnInit {
       this.api.health().subscribe({
         next: (h: any) => {
           this.backendOk = true;
+          if (h?.version) this.appVersion = h.version;
+          if (h?.release_name) this.releaseName = h.release_name;
           if (h?.api_auth_enabled && !getApiToken()) {
             this.needsUnlock = true;
           }
