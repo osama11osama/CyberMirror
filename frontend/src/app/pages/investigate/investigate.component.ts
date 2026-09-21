@@ -172,6 +172,12 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
 
         </button>
 
+        <p class="hint warn" *ngIf="!backendOk">Start the backend (<code>CyberMirror.bat</code>) before scanning.</p>
+
+        <p class="hint warn" *ngIf="backendOk && !canScan() && !scanning">
+          Enter at least a name, username, email, phone, or website, and keep one module selected.
+        </p>
+
         <p class="error" *ngIf="error">{{ error }}</p>
 
       </div>
@@ -335,7 +341,7 @@ const CONSENT_KEY = 'cybermirror_consent_v1';
     .rec { font-size: 0.85rem; max-width: 200px; color: var(--cm-text); }
 
     .hint, .muted { color: var(--cm-muted); }
-
+    .hint.warn { color: #d29922; margin-top: 0.5rem; font-size: 0.85rem; }
     .error { color: var(--cm-critical); margin-top: 0.75rem; }
 
     .module-errors { margin-top: 0.75rem; font-size: 0.85rem; color: var(--cm-critical); }
@@ -379,7 +385,7 @@ export class InvestigateComponent implements OnInit, OnDestroy {
 
   lastScanId = '';
 
-  backendOk = true;
+  backendOk = false;
 
   showConsent = false;
 

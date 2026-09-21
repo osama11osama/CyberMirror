@@ -1,7 +1,8 @@
 """Scan job progress tracking (in-memory)."""
 
-from datetime import datetime
 from typing import Any
+
+from app.services.timeutil import utc_now_iso
 
 _jobs: dict[str, dict[str, Any]] = {}
 _cancelled: set[str] = set()
@@ -18,7 +19,7 @@ def create_job(scan_id: str, providers: list[str]) -> None:
         "total_providers": len(providers),
         "current_provider": "",
         "message": "Initializing scan…",
-        "started_at": datetime.utcnow().isoformat(),
+        "started_at": utc_now_iso(),
         "findings_so_far": 0,
         "modules_completed": 0,
         "module_errors": [],

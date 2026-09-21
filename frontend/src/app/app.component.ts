@@ -245,17 +245,28 @@ export class AppComponent implements OnInit {
     document.documentElement.dir = 'ltr';
 
     const existing = getApiToken();
-    this.api.health().subscribe({
-      next: (h: any) => {
-        this.backendOk = true;
-        if (h?.api_auth_enabled && !existing) {
-          this.needsUnlock = true;
-        }
-      },
-      error: () => {
-        this.backendOk = false;
-      },
-    });
+    const checkHealth = () => {
+      this.api.health().subscribe({
+        next: (h: any) => {
+          this.backendOk = true;
+          if (h?.api_auth_enabled && !getApiToken()) {
+            this.needsUnlock = true;
+          }
+        },
+        error: () => {
+          this.backendOk = false;
+        },
+      });
+    };
+    checkHealth();
+    // Keep sidebar status honest when the backend stops/starts.
+    setInterval(checkHealth, 15000);
+
+    if (existing) {
+      this.needsUnlock = false;
+    } else {
+      // needsUnlock decided after health (auth may be disabled)
+    }
   }
 
   submitUnlock() {

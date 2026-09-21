@@ -6,6 +6,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts/core';
 import { ApiService } from '../../services/api.service';
+import { asUtcDate } from '../../utils/dates';
 
 @Component({
   selector: 'cm-dashboard',
@@ -22,7 +23,7 @@ import { ApiService } from '../../services/api.service';
       <label>Select scan</label>
       <select [(ngModel)]="selectedScanId" (ngModelChange)="loadScan()">
         <option *ngFor="let s of scans" [value]="s.id">
-          {{ s.created_at | date:'medium' }} — {{ s.profile.username || s.profile.email || 'scan' }} ({{ s.risk_score }})
+          {{ formatDate(s.created_at) | date:'medium' }} — {{ s.profile.username || s.profile.email || 'scan' }} ({{ s.risk_score }})
         </option>
       </select>
     </div>
@@ -42,7 +43,7 @@ import { ApiService } from '../../services/api.service';
       </div>
       <div class="stat-card">
         <span class="label">Last Scan</span>
-        <span class="value sm">{{ activeScan.created_at | date:'medium' }}</span>
+        <span class="value sm">{{ formatDate(activeScan.created_at) | date:'medium' }}</span>
       </div>
     </div>
 
@@ -95,6 +96,10 @@ export class DashboardComponent implements OnInit {
   trendChart: any = {};
 
   constructor(private api: ApiService) {}
+
+  formatDate(value: string) {
+    return asUtcDate(value);
+  }
 
   ngOnInit() {
     this.api.listScans(30).subscribe(scans => {

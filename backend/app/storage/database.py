@@ -2,13 +2,13 @@
 
 import json
 import sqlite3
-from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 from app.config import settings
 from app.models.schemas import Finding, IdentityProfile, ScanSummary
 from app.services.crypto import decrypt_text, encrypt_text
+from app.services.timeutil import parse_iso_datetime, to_iso, utc_now_iso
 
 
 def _store_profile(profile: IdentityProfile) -> str:
@@ -77,9 +77,20 @@ def init_db() -> None:
         conn.commit()
 
 
+def mark_orphaned_running_scans() -> int:
+    """Mark in-progress scans as failed after a process restart (jobs are in-memory only)."""
+    with _connect() as conn:
+        cur = conn.execute(
+            "UPDATE scans SET status=? WHERE status=?",
+            ("failed", "running"),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
 def create_scan(profile: IdentityProfile, providers: list[str]) -> str:
     scan_id = str(uuid4())
-    now = datetime.utcnow().isoformat()
+    now = utc_now_iso()
     with _connect() as conn:
         conn.execute(
             """
@@ -134,7 +145,7 @@ def save_findings(findings: list[Finding]) -> None:
                     f.risk_level.value,
                     f.risk_reason,
                     f.recommendation,
-                    f.timestamp.isoformat(),
+                    to_iso(f.timestamp),
                     json.dumps({**(f.raw or {}), "outcome": f.outcome.value}),
                 )
                 for f in findings
@@ -189,7 +200,7 @@ def get_scan(scan_id: str) -> dict | None:
 def _row_to_summary(row: sqlite3.Row) -> ScanSummary:
     return ScanSummary(
         id=row["id"],
-        created_at=datetime.fromisoformat(row["created_at"]),
+        created_at=parse_iso_datetime(row["created_at"]),
         profile=_load_profile(row["profile_json"]),
         status=row["status"],
         providers=json.loads(row["providers"]),
@@ -226,7 +237,7 @@ def row_to_finding(row: dict) -> Finding:
         risk_reason=row["risk_reason"] or "",
         recommendation=row["recommendation"] or "",
         outcome=outcome,
-        timestamp=datetime.fromisoformat(row["timestamp"]),
+        timestamp=parse_iso_datetime(row["timestamp"]),
         raw=raw,
     )
 
