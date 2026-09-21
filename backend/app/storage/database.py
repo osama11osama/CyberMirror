@@ -10,6 +10,9 @@ from app.models.schemas import Finding, IdentityProfile, ScanSummary
 from app.services.crypto import decrypt_text, encrypt_text
 from app.services.timeutil import parse_iso_datetime, to_iso, utc_now_iso
 
+# Bump when exposure scoring formula changes so legacy rows are backfilled once.
+CURRENT_SCORING_VERSION = 1
+
 
 def _store_profile(profile: IdentityProfile) -> str:
     return encrypt_text(profile.model_dump_json())
@@ -30,6 +33,24 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(scans)").fetchall()}
+    if "scoring_version" not in cols:
+        conn.execute(
+            "ALTER TABLE scans ADD COLUMN scoring_version INTEGER NOT NULL DEFAULT 0"
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_scan_id ON findings(scan_id)"
+    )
+
+
+def _row_scoring_version(row: sqlite3.Row | dict) -> int:
+    try:
+        return int(row["scoring_version"] or 0)
+    except (KeyError, IndexError, TypeError):
+        return 0
+
+
 def init_db() -> None:
     with _connect() as conn:
         conn.executescript(
@@ -41,7 +62,8 @@ def init_db() -> None:
                 providers TEXT NOT NULL,
                 profile_json TEXT NOT NULL,
                 risk_score REAL DEFAULT 0,
-                finding_count INTEGER DEFAULT 0
+                finding_count INTEGER DEFAULT 0,
+                scoring_version INTEGER NOT NULL DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS findings (
@@ -74,6 +96,7 @@ def init_db() -> None:
             );
             """
         )
+        _migrate_schema(conn)
         conn.commit()
 
 
@@ -112,28 +135,58 @@ def update_scan_status(
     with _connect() as conn:
         conn.execute(
             """
-            UPDATE scans SET status=?, finding_count=?, risk_score=? WHERE id=?
+            UPDATE scans
+            SET status=?, finding_count=?, risk_score=?, scoring_version=?
+            WHERE id=?
             """,
-            (status, finding_count, risk_score, scan_id),
+            (status, finding_count, risk_score, CURRENT_SCORING_VERSION, scan_id),
         )
         conn.commit()
 
 
 def sync_risk_score(scan_id: str, findings: list[Finding], stored: float | None = None) -> float:
-    """Recompute evidence-aware score and persist when it drifts from storage.
+    """Recompute evidence-aware score and stamp scoring_version when needed.
 
-    Keeps History / trends / exports aligned with scan-detail for pre-v2.4 rows.
+    Findings are already loaded by callers (detail/dashboard/export); this persists
+    the live score so History/trends can trust stored values after one backfill.
     """
     from app.services.exposure_scoring import compute_risk_score
 
     score = float(compute_risk_score(findings))
-    if stored is None or abs(float(stored) - score) > 0.05:
-        with _connect() as conn:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT risk_score, scoring_version FROM scans WHERE id=?",
+            (scan_id,),
+        ).fetchone()
+        if not row:
+            return score
+        stored_score = float(stored) if stored is not None else float(row["risk_score"] or 0)
+        version = _row_scoring_version(row)
+        if version < CURRENT_SCORING_VERSION or abs(stored_score - score) > 0.05:
             conn.execute(
-                "UPDATE scans SET risk_score=? WHERE id=?",
-                (score, scan_id),
+                "UPDATE scans SET risk_score=?, scoring_version=? WHERE id=?",
+                (score, CURRENT_SCORING_VERSION, scan_id),
             )
             conn.commit()
+    return score
+
+
+def _backfill_scan_score(
+    conn: sqlite3.Connection, scan_id: str
+) -> float:
+    """One-time recompute for a legacy row; stamps CURRENT_SCORING_VERSION."""
+    from app.services.exposure_scoring import compute_risk_score
+
+    finding_rows = conn.execute(
+        "SELECT * FROM findings WHERE scan_id=? ORDER BY timestamp",
+        (scan_id,),
+    ).fetchall()
+    findings = [row_to_finding(dict(f)) for f in finding_rows]
+    score = float(compute_risk_score(findings))
+    conn.execute(
+        "UPDATE scans SET risk_score=?, scoring_version=? WHERE id=?",
+        (score, CURRENT_SCORING_VERSION, scan_id),
+    )
     return score
 
 
@@ -182,31 +235,21 @@ def save_findings(findings: list[Finding]) -> None:
 
 
 def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
-    from app.services.exposure_scoring import compute_risk_score
-
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM scans ORDER BY created_at DESC LIMIT ? OFFSET ?",
             (limit, offset),
         ).fetchall()
         out: list[ScanSummary] = []
-        dirty: list[tuple[float, str]] = []
+        dirty = False
         for r in rows:
-            finding_rows = conn.execute(
-                "SELECT * FROM findings WHERE scan_id=? ORDER BY timestamp",
-                (r["id"],),
-            ).fetchall()
-            findings = [row_to_finding(dict(f)) for f in finding_rows]
-            score = float(compute_risk_score(findings))
-            stored = float(r["risk_score"] or 0)
-            if abs(stored - score) > 0.05:
-                dirty.append((score, r["id"]))
+            if _row_scoring_version(r) >= CURRENT_SCORING_VERSION:
+                out.append(_row_to_summary(r))
+                continue
+            score = _backfill_scan_score(conn, r["id"])
+            dirty = True
             out.append(_row_to_summary(r, risk_score=score))
         if dirty:
-            conn.executemany(
-                "UPDATE scans SET risk_score=? WHERE id=?",
-                dirty,
-            )
             conn.commit()
     return out
 
@@ -343,30 +386,24 @@ def compare_scans(scan_a: str, scan_b: str):
 
 
 def risk_trends(limit: int = 20) -> list[dict]:
-    """Recent scans for dashboard trend chart (live evidence-aware scores)."""
-    from app.services.exposure_scoring import compute_risk_score
-
+    """Recent scans for dashboard trend chart (cached evidence-aware scores)."""
     with _connect() as conn:
         rows = conn.execute(
             """
-            SELECT id, created_at, risk_score, finding_count, status
+            SELECT id, created_at, risk_score, finding_count, status, scoring_version
             FROM scans WHERE status IN ('completed', 'cancelled')
             ORDER BY created_at DESC LIMIT ?
             """,
             (limit,),
         ).fetchall()
         out: list[dict] = []
-        dirty: list[tuple[float, str]] = []
+        dirty = False
         for r in rows:
-            finding_rows = conn.execute(
-                "SELECT * FROM findings WHERE scan_id=? ORDER BY timestamp",
-                (r["id"],),
-            ).fetchall()
-            findings = [row_to_finding(dict(f)) for f in finding_rows]
-            score = float(compute_risk_score(findings))
-            stored = float(r["risk_score"] or 0)
-            if abs(stored - score) > 0.05:
-                dirty.append((score, r["id"]))
+            if _row_scoring_version(r) >= CURRENT_SCORING_VERSION:
+                score = float(r["risk_score"] or 0)
+            else:
+                score = _backfill_scan_score(conn, r["id"])
+                dirty = True
             out.append(
                 {
                     "id": r["id"],
@@ -377,9 +414,5 @@ def risk_trends(limit: int = 20) -> list[dict]:
                 }
             )
         if dirty:
-            conn.executemany(
-                "UPDATE scans SET risk_score=? WHERE id=?",
-                dirty,
-            )
             conn.commit()
     return list(reversed(out))
