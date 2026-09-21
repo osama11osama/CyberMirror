@@ -119,11 +119,14 @@ def extract_entities(artifact: PageArtifact, *, max_entities: int = 40) -> list[
     for m in _ISO_DATE_RE.finditer(text):
         y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
         fuzzy = parse_fuzzy_date(m.group(0), year=y, month=mo, day=d)
+        if fuzzy.value is None:
+            # ISO-shaped but invalid calendar date (e.g. 2026-99-40) — skip.
+            continue
         add(
             Entity(
                 type=EntityType.DATETIME_EXPRESSION,
                 original_value=m.group(0),
-                normalized_value=fuzzy.value.isoformat() if fuzzy.value else m.group(0),
+                normalized_value=fuzzy.value.isoformat(),
                 origin=IntelligenceOrigin.OBSERVED,
                 supporting_evidence_ids=[evidence_id] if evidence_id else [],
                 extraction_method="regex_iso_date",

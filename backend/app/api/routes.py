@@ -67,6 +67,7 @@ from app.storage.database import (
     list_scans,
     load_intelligence,
     profile_from_row,
+    redact_intelligence_artifacts,
     risk_trends,
     row_to_finding,
     save_intelligence,
@@ -513,17 +514,29 @@ def scan_graph(scan_id: str):
 
 def scan_intelligence(scan_id: str, refresh: bool = Query(False)):
 
+    return _intelligence_for_scan(scan_id, refresh=bool(refresh))
+
+
+
+
+
+def _intelligence_for_scan(scan_id: str, *, refresh: bool = False) -> dict:
+
+    """Load cached intelligence or build it. ``refresh`` must be a plain bool."""
+
     data = get_scan(scan_id)
 
     if not data:
 
         raise HTTPException(404, "Scan not found")
 
-    existing = None if refresh else load_intelligence(scan_id)
+    if not refresh:
 
-    if existing:
+        existing = load_intelligence(scan_id)
 
-        return existing
+        if existing:
+
+            return existing
 
     profile = profile_from_row(data["scan"])
 
@@ -545,7 +558,7 @@ def scan_intelligence(scan_id: str, refresh: bool = Query(False)):
 
 def scan_timeline(scan_id: str):
 
-    intel = scan_intelligence(scan_id)
+    intel = _intelligence_for_scan(scan_id, refresh=False)
 
     return intel.get("timeline") or {"dated": [], "unknown_date": []}
 
@@ -557,7 +570,7 @@ def scan_timeline(scan_id: str):
 
 def scan_journal(scan_id: str):
 
-    intel = scan_intelligence(scan_id)
+    intel = _intelligence_for_scan(scan_id, refresh=False)
 
     return intel.get("journal") or {"scan_id": scan_id, "steps": []}
 
@@ -585,7 +598,19 @@ def budget_defaults():
 
 def list_scan_artifacts(scan_id: str):
 
-    from app.services.investigation_budget import list_deep_artifacts
+    if not get_scan(scan_id):
+
+        raise HTTPException(404, "Scan not found")
+
+    from app.services.investigation_budget import list_deep_artifacts, validate_artifact_scan_id
+
+    try:
+
+        validate_artifact_scan_id(scan_id)
+
+    except ValueError as exc:
+
+        raise HTTPException(400, str(exc)) from exc
 
     return {"scan_id": scan_id, "files": list_deep_artifacts(scan_id)}
 
@@ -597,9 +622,25 @@ def list_scan_artifacts(scan_id: str):
 
 def delete_scan_artifacts(scan_id: str):
 
-    from app.services.investigation_budget import delete_deep_artifacts
+    if not get_scan(scan_id):
 
-    return {"deleted": delete_deep_artifacts(scan_id)}
+        raise HTTPException(404, "Scan not found")
+
+    from app.services.investigation_budget import delete_deep_artifacts, validate_artifact_scan_id
+
+    try:
+
+        validate_artifact_scan_id(scan_id)
+
+    except ValueError as exc:
+
+        raise HTTPException(400, str(exc)) from exc
+
+    deleted_files = delete_deep_artifacts(scan_id)
+
+    redacted = redact_intelligence_artifacts(scan_id)
+
+    return {"deleted": deleted_files, "redacted_payload_artifacts": redacted}
 
 
 
