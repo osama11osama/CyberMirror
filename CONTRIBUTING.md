@@ -47,7 +47,7 @@ docker compose up --build
 
 - App / API: `http://localhost:8787` (UI served from the image when built; API under `/api`)
 - Health: `http://localhost:8787/api/health`
-- Bundled UI bootstraps auth via same-origin `/cybermirror-runtime.js` (token is not exposed on `/api/health`).
+- Bundled UI uses same-origin `/api`. Unlock with the in-app token form or `#api_token=<token>` after reading `data/.api_token` — HTTP endpoints never return the API token.
 - Compose sets `HOST=0.0.0.0` so the published port works; local non-Docker defaults remain localhost.
 - Volumes `cm-data` and `cm-exports` persist SQLite, token, logs, and exports.
 - Optional: set `API_TOKEN` in Compose to pin a stable credential.

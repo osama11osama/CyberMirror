@@ -124,7 +124,7 @@ docker compose up --build
 
 - UI + API: `http://localhost:8787` (static UI is bundled in the image; API under `/api`)
 - Health: `http://localhost:8787/api/health`
-- The bundled UI loads a same-origin `/cybermirror-runtime.js` bootstrap so API auth works without pasting a token. `/api/health` never returns credentials.
+- The bundled UI does **not** receive the API token over HTTP. Unlock with the in-app form, or open `http://localhost:8787/#api_token=<token>` after reading `data/.api_token` (`docker compose exec cybermirror cat /app/data/.api_token`). `/api/health` and `/cybermirror-runtime.js` never return credentials.
 - Compose binds the server to `0.0.0.0` inside the container so port `8787` is reachable. Local non-Docker defaults remain `127.0.0.1`.
 - Named volumes persist `data/` (SQLite, API token, logs) and `exports/`.
 - Image build **fails** if Playwright/Chromium cannot be installed (no silent `|| true`).

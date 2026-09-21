@@ -92,6 +92,17 @@ async def lifespan(app):
 
     start_scheduler()
 
+    if settings.api_auth_enabled:
+        from app.services.auth import get_or_create_token
+        import logging
+
+        get_or_create_token()  # ensure data/.api_token exists for operators
+        logging.getLogger("cybermirror").info(
+            "API auth is enabled. Unlock the UI with #api_token=<token> or the in-app unlock form. "
+            "Read the token from data/.api_token (Docker: docker compose exec cybermirror cat /app/data/.api_token). "
+            "HTTP endpoints never return the API token."
+        )
+
     yield
 
 
@@ -744,14 +755,11 @@ def _resolve_ui_dir():
 
 
 def _mount_bundled_ui(app) -> None:
-    """Serve the Angular build with SPA fallback and same-origin API bootstrap."""
+    """Serve the Angular build with SPA fallback and same-origin API base hint."""
     import json
-    from pathlib import Path
 
     from fastapi import HTTPException
     from fastapi.responses import FileResponse, HTMLResponse, Response
-
-    from app.services.auth import get_or_create_token
 
     ui_dir = _resolve_ui_dir()
     if ui_dir is None:
@@ -762,11 +770,9 @@ def _mount_bundled_ui(app) -> None:
 
     @app.get("/cybermirror-runtime.js")
     def cybermirror_runtime_js():
-        # Same-origin bootstrap for the bundled UI (Docker / static mount).
-        # Keeps /api/health free of credentials; Electron/launcher still inject separately.
+        # Same-origin API base only — never embed the bearer token (public GET).
+        # Launcher/Electron inject window.cyberMirror.apiToken; Docker/manual use #api_token= or UI unlock.
         payload = {"apiBase": "/api"}
-        if settings.api_auth_enabled:
-            payload["apiToken"] = get_or_create_token()
         body = (
             "window.cyberMirror=Object.assign(window.cyberMirror||{},"
             f"{json.dumps(payload)});"
