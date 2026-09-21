@@ -236,8 +236,8 @@ export class AppComponent implements OnInit {
   unlockDraft = '';
   unlockError = '';
   unlockBusy = false;
-  appVersion = '2.3.0';
-  releaseName = 'Evidence';
+  appVersion = '2.4.0';
+  releaseName = 'Correlation';
 
   constructor(private api: ApiService) {}
 
@@ -246,16 +246,13 @@ export class AppComponent implements OnInit {
     document.documentElement.lang = 'en';
     document.documentElement.dir = 'ltr';
 
-    const existing = getApiToken();
     const checkHealth = () => {
       this.api.health().subscribe({
         next: (h: any) => {
           this.backendOk = true;
           if (h?.version) this.appVersion = h.version;
           if (h?.release_name) this.releaseName = h.release_name;
-          if (h?.api_auth_enabled && !getApiToken()) {
-            this.needsUnlock = true;
-          }
+          this.evaluateUnlockGate(!!h?.api_auth_enabled);
         },
         error: () => {
           this.backendOk = false;
@@ -263,14 +260,29 @@ export class AppComponent implements OnInit {
       });
     };
     checkHealth();
-    // Keep sidebar status honest when the backend stops/starts.
     setInterval(checkHealth, 15000);
+  }
 
-    if (existing) {
+  private evaluateUnlockGate(authEnabled: boolean) {
+    if (!authEnabled) {
       this.needsUnlock = false;
-    } else {
-      // needsUnlock decided after health (auth may be disabled)
+      return;
     }
+    const token = getApiToken();
+    if (!token) {
+      this.needsUnlock = true;
+      return;
+    }
+    // Validate stored/injected tokens so stale values re-open the unlock form.
+    this.api.modules().subscribe({
+      next: () => {
+        this.needsUnlock = false;
+      },
+      error: () => {
+        sessionStorage.removeItem('cybermirror_api_token');
+        this.needsUnlock = true;
+      },
+    });
   }
 
   submitUnlock() {

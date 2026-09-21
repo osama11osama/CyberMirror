@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "CyberMirror"
-    app_version: str = "2.3.0"
-    app_release_name: str = "Evidence"
+    app_version: str = "2.4.0"
+    app_release_name: str = "Correlation"
     host: str = "127.0.0.1"
     port: int = 8787
     debug: bool = False

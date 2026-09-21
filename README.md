@@ -198,7 +198,7 @@ CyberMirror/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, Docker, PR expectations, privacy rules, and how to add scanners.
 
-Current release: **v2.3.0 “Evidence”** — verification states, structured provenance, expanded integration tests.
+Current release: **v2.4.0 “Correlation”** — evidence-aware exposure scoring and evidence-backed identity graph (builds on v2.3 Evidence).
 
 Backend tests:
 
