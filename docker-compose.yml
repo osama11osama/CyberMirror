@@ -11,7 +11,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8787
       - ENCRYPTION_ENABLED=true
-      # Optional: pin a stable token (otherwise one is written under data/.api_token).
+      # Optional: pin a stable token (bundled UI loads it via /cybermirror-runtime.js).
       # - API_TOKEN=change-me
     healthcheck:
       test:

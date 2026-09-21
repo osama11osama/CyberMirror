@@ -724,10 +724,13 @@ def create_app():
 
     app.include_router(router)
 
-    # Serve the built Angular UI when present (Docker image and local prod builds).
-    from pathlib import Path
+    _mount_bundled_ui(app)
 
-    from fastapi.staticfiles import StaticFiles
+    return app
+
+
+def _resolve_ui_dir():
+    from pathlib import Path
 
     from app.config import PROJECT_ROOT
 
@@ -736,8 +739,69 @@ def create_app():
         PROJECT_ROOT / "frontend" / "dist",
     ):
         if (Path(candidate) / "index.html").is_file():
-            app.mount("/", StaticFiles(directory=str(candidate), html=True), name="ui")
-            break
+            return Path(candidate)
+    return None
 
-    return app
+
+def _mount_bundled_ui(app) -> None:
+    """Serve the Angular build with SPA fallback and same-origin API bootstrap."""
+    import json
+    from pathlib import Path
+
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse, HTMLResponse, Response
+
+    from app.services.auth import get_or_create_token
+
+    ui_dir = _resolve_ui_dir()
+    if ui_dir is None:
+        return
+
+    index_path = ui_dir / "index.html"
+    ui_root = ui_dir.resolve()
+
+    @app.get("/cybermirror-runtime.js")
+    def cybermirror_runtime_js():
+        # Same-origin bootstrap for the bundled UI (Docker / static mount).
+        # Keeps /api/health free of credentials; Electron/launcher still inject separately.
+        payload = {"apiBase": "/api"}
+        if settings.api_auth_enabled:
+            payload["apiToken"] = get_or_create_token()
+        body = (
+            "window.cyberMirror=Object.assign(window.cyberMirror||{},"
+            f"{json.dumps(payload)});"
+        )
+        return Response(
+            content=body,
+            media_type="application/javascript",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    def _spa_index() -> HTMLResponse:
+        html = index_path.read_text(encoding="utf-8")
+        inject = '<script src="/cybermirror-runtime.js"></script>'
+        if "cybermirror-runtime.js" not in html:
+            html = html.replace("</head>", f"  {inject}\n</head>", 1)
+        return HTMLResponse(html)
+
+    @app.get("/")
+    def ui_root_index():
+        return _spa_index()
+
+    @app.get("/{full_path:path}")
+    def spa_fallback(full_path: str):
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not Found")
+        if full_path == "cybermirror-runtime.js":
+            return cybermirror_runtime_js()
+
+        target = (ui_dir / full_path).resolve()
+        try:
+            target.relative_to(ui_root)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not Found") from None
+
+        if target.is_file():
+            return FileResponse(target)
+        return _spa_index()
 

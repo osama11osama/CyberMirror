@@ -47,9 +47,10 @@ docker compose up --build
 
 - App / API: `http://localhost:8787` (UI served from the image when built; API under `/api`)
 - Health: `http://localhost:8787/api/health`
+- Bundled UI bootstraps auth via same-origin `/cybermirror-runtime.js` (token is not exposed on `/api/health`).
 - Compose sets `HOST=0.0.0.0` so the published port works; local non-Docker defaults remain localhost.
 - Volumes `cm-data` and `cm-exports` persist SQLite, token, logs, and exports.
-- Read the API token from the `data` volume (`.api_token`) or set `API_TOKEN` in Compose.
+- Optional: set `API_TOKEN` in Compose to pin a stable credential.
 - Playwright/Chromium install is **fail-closed** in the Dockerfile (build fails if browser deps cannot install).
 
 ## Tests

@@ -10,7 +10,13 @@ from starlette.responses import JSONResponse
 from app.config import PROJECT_ROOT, settings
 
 _TOKEN_FILE = PROJECT_ROOT / "data" / ".api_token"
-PUBLIC_PATHS = {"/api/health", "/docs", "/openapi.json", "/redoc"}
+PUBLIC_PATHS = {
+    "/api/health",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+    "/cybermirror-runtime.js",
+}
 
 
 def get_or_create_token() -> str:

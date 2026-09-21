@@ -36,7 +36,8 @@ def _extract_handle(url: str) -> str | None:
 
 
 def _blob(finding: Finding) -> str:
-    return f"{finding.title} {finding.description} {finding.snippet} {finding.url}".lower()
+    """Observed evidence only — skip description (often embeds search-query seeds)."""
+    return f"{finding.title} {finding.snippet} {finding.url}".lower()
 
 
 def _mentions(finding: Finding, *needles: str) -> bool:
@@ -79,8 +80,8 @@ def correlate_findings(
                 scan_id,
                 "Name + Username linked in public results",
                 "Observed sources mention both the real name and username together.",
-                profile,
                 support,
+                pair=(profile.full_name, profile.username),
             ))
 
     if profile.email and profile.full_name:
@@ -90,8 +91,8 @@ def correlate_findings(
                 scan_id,
                 "Email + Real Name linked in public results",
                 "Observed sources mention both the email and real name together.",
-                profile,
                 support,
+                pair=(profile.email, profile.full_name),
             ))
 
     if profile.phone and profile.location:
@@ -101,8 +102,8 @@ def correlate_findings(
                 scan_id,
                 "Phone + Location linked in public results",
                 "Observed sources mention both the phone and location together.",
-                profile,
                 support,
+                pair=(profile.phone, profile.location),
             ))
 
     real_platforms = list(by_platform.keys())
@@ -219,10 +220,13 @@ def _corr(
     scan_id: str,
     title: str,
     desc: str,
-    profile: IdentityProfile,
     support: list[Finding],
+    *,
+    pair: tuple[str, ...] = (),
 ) -> Finding:
     sources = sorted({f.source or f.platform for f in support if f.source or f.platform})
+    # Snippet carries only the correlated pair — never extra seed fields (e.g. location).
+    snippet = " | ".join(part for part in pair if part)
     return Finding(
         scan_id=scan_id,
         source="identity_correlator",
@@ -233,7 +237,7 @@ def _corr(
         description=f"{desc} Supporting sources: {', '.join(sources[:8]) or 'observed findings'}.",
         confidence=0.9,
         outcome=FindingOutcome.CONFIRMED,
-        snippet=f"{profile.full_name or ''} | {profile.username or ''} | {profile.location or ''}".strip(),
+        snippet=snippet,
         raw={
             "outcome": FindingOutcome.CONFIRMED.value,
             "supporting_finding_ids": [f.id for f in support[:50]],
