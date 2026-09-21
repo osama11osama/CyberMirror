@@ -4,6 +4,10 @@ from typing import Any
 
 from app.services.timeutil import utc_now_iso
 
+_jobs: dict[str, dict[str, Any]] = {}
+_cancelled: set[str] = set()
+_live_findings: dict[str, list[dict]] = {}
+
 
 def create_job(scan_id: str, providers: list[str]) -> None:
     _cancelled.discard(scan_id)
