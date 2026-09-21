@@ -1,4 +1,4 @@
-"""Bundled UI serving: runtime token bootstrap and SPA fallback."""
+"""Bundled UI serving: runtime config (no token) and SPA fallback."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,13 +26,14 @@ def ui_dist(tmp_path, monkeypatch):
     return dist
 
 
-def test_runtime_js_bootstraps_api_token(ui_dist, monkeypatch):
+def test_runtime_js_never_exposes_api_token(ui_dist):
     client = TestClient(create_app())
     response = client.get("/cybermirror-runtime.js")
     assert response.status_code == 200
     body = response.text
-    assert 'apiBase' in body and "/api" in body
-    assert "docker-ui-token" in body
+    assert "apiBase" in body and "/api" in body
+    assert "docker-ui-token" not in body
+    assert "apiToken" not in body
     assert "api_token" not in client.get("/api/health").json()
 
 

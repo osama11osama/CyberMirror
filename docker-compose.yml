@@ -11,7 +11,7 @@ services:
       - HOST=0.0.0.0
       - PORT=8787
       - ENCRYPTION_ENABLED=true
-      # Optional: pin a stable token (bundled UI loads it via /cybermirror-runtime.js).
+      # Optional: pin a stable token for the unlock form / #api_token= fragment.
       # - API_TOKEN=change-me
     healthcheck:
       test:
