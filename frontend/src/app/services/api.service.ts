@@ -5,8 +5,14 @@ import { Observable, interval, switchMap, takeWhile, last } from 'rxjs';
 const API = (() => {
   const custom = (window as any).cyberMirror?.apiBase;
   if (custom) return custom;
-  const host = window.location.hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost';
-  return `http://${host}:8787/api`;
+  const { hostname, port, origin } = window.location;
+  // Angular CLI dev server talks to a separate backend process.
+  if (port === '4200') {
+    const host = hostname === '127.0.0.1' ? '127.0.0.1' : 'localhost';
+    return `http://${host}:8787/api`;
+  }
+  // Bundled UI (Docker / static mount): same origin as the API.
+  return `${origin}/api`;
 })();
 
 export interface IdentityProfile {
