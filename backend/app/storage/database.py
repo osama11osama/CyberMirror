@@ -304,28 +304,38 @@ def redact_intelligence_artifacts(scan_id: str) -> int:
     """Clear captured page text from persisted intelligence payloads.
 
     File-cache deletion alone is insufficient because PageArtifact.main_text is
-    also stored in scans.intelligence_json.
+    also stored in scans.intelligence_json. Persist whenever main_text,
+    metadata body fields, or the redaction marker change — not only when
+    main_text was nonempty.
     """
     payload = load_intelligence(scan_id)
     if not payload:
         return 0
-    redacted = 0
+    changed = 0
     artifacts = payload.get("artifacts")
     if isinstance(artifacts, list):
         for art in artifacts:
             if not isinstance(art, dict):
                 continue
+            mutated = False
             if art.get("main_text"):
                 art["main_text"] = ""
-                redacted += 1
-            if art.get("metadata") and isinstance(art["metadata"], dict):
+                mutated = True
+            meta = art.get("metadata")
+            if isinstance(meta, dict):
                 # Drop bulky nested copies; keep provenance ids/status.
-                art["metadata"].pop("raw_html", None)
-                art["metadata"].pop("body", None)
-            art["content_redacted"] = True
-    if redacted:
+                for key in ("raw_html", "body"):
+                    if key in meta:
+                        meta.pop(key, None)
+                        mutated = True
+            if not art.get("content_redacted"):
+                art["content_redacted"] = True
+                mutated = True
+            if mutated:
+                changed += 1
+    if changed:
         save_intelligence(scan_id, payload)
-    return redacted
+    return changed
 
 
 def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
