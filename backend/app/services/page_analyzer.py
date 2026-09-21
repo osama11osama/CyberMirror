@@ -7,12 +7,14 @@ import re
 from datetime import datetime
 from enum import Enum
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 from app.models.evidence import BLOCK_MARKERS, EvidenceKind, EvidenceObservation, VerificationState
 from app.services.investigation_budget import InvestigationBudget
+from app.services.public_target import TargetValidation, validate_public_target_async
 from app.services.timeutil import utc_now
 
 
@@ -54,6 +56,18 @@ _ERROR_MARKERS = ("404 not found", "page not found", "500 internal", "access den
 
 def _hash_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8", errors="ignore")).hexdigest()
+
+
+def _canonical_from_html(body: str, base_url: str) -> str:
+    for tag in re.findall(r"(?is)<link\b[^>]*>", body or ""):
+        rel = re.search(r"(?is)\brel\s*=\s*['\"]([^'\"]+)['\"]", tag)
+        href = re.search(r"(?is)\bhref\s*=\s*['\"]([^'\"]+)['\"]", tag)
+        if not rel or not href or "canonical" not in rel.group(1).lower().split():
+            continue
+        candidate = urljoin(base_url, href.group(1).strip())
+        if urlsplit(candidate).scheme.lower() in {"http", "https"}:
+            return candidate
+    return ""
 
 
 def detect_block_or_challenge(text: str, status: int | None = None) -> str | None:
@@ -118,10 +132,11 @@ def artifact_from_http(
         verification=verification,
         confidence_reason="deep_page_analyzer",
     )
+    resolved_final_url = final_url or source_url
     return PageArtifact(
         source_url=source_url,
-        canonical_url=canonical_url or source_url,
-        final_url=final_url or source_url,
+        canonical_url=canonical_url or _canonical_from_html(body, resolved_final_url) or source_url,
+        final_url=resolved_final_url,
         title=title,
         main_text=main,
         acquisition_method=method,
@@ -140,6 +155,7 @@ def artifact_from_snippet(
     snippet: str,
     title: str = "",
     scan_id: str = "",
+    destination_failure_reason: str | None = None,
 ) -> PageArtifact:
     """Weaker evidence: indexed text only when destination is unavailable."""
     text = (snippet or "").strip()
@@ -160,7 +176,15 @@ def artifact_from_snippet(
         content_hash=_hash_text(text),
         evidence_id=evidence.id,
         scan_id=scan_id,
-        metadata={"evidence": evidence.model_dump(mode="json"), "weaker_than": "direct_page"},
+        metadata={
+            "evidence": evidence.model_dump(mode="json"),
+            "weaker_than": "direct_page",
+            **(
+                {"destination_failure_reason": destination_failure_reason}
+                if destination_failure_reason
+                else {}
+            ),
+        },
     )
 
 
@@ -172,15 +196,22 @@ async def acquire_page(
     prefer_playwright: bool = False,
     snippet_fallback: str = "",
     title: str = "",
+    transport: Any | None = None,
 ) -> PageArtifact:
     """Acquire a public page respecting budgets; never bypasses protections."""
+    if budget and budget.is_cancelled():
+        return _cancelled_artifact(url, scan_id=scan_id)
+    validation = await validate_public_target_async(url)
+    if not validation.allowed:
+        return _rejected_artifact(url, validation, scan_id=scan_id)
     if budget:
         stop = budget.consume_page(url)
         if stop:
-            return PageArtifact(
-                source_url=url,
-                acquisition_method=AcquisitionMethod.UNSUPPORTED,
-                blocked_reason=stop,
+            return _structured_outcome_artifact(
+                url,
+                method=AcquisitionMethod.UNSUPPORTED,
+                reason=stop,
+                verification=VerificationState.BLOCKED,
                 scan_id=scan_id,
             )
         if budget.is_cancelled():
@@ -195,8 +226,48 @@ async def acquire_page(
     try:
         import httpx
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout) as client:
-            resp = await client.get(url)
+        async with httpx.AsyncClient(
+            follow_redirects=False,
+            timeout=timeout,
+            transport=transport,
+        ) as client:
+            request_url = url
+            redirect_count = 0
+            while True:
+                if budget and budget.is_cancelled():
+                    return _cancelled_artifact(url, scan_id=scan_id)
+                resp = await client.get(request_url)
+                if not resp.is_redirect:
+                    break
+                redirect_count += 1
+                if redirect_count > 8:
+                    return _rejected_artifact(
+                        url,
+                        TargetValidation(False, request_url, "too_many_redirects"),
+                        scan_id=scan_id,
+                    )
+                location = resp.headers.get("location", "")
+                next_url = urljoin(str(resp.url), location)
+                redirect_validation = await validate_public_target_async(next_url)
+                if not redirect_validation.allowed:
+                    return _rejected_artifact(
+                        url,
+                        redirect_validation,
+                        scan_id=scan_id,
+                        final_url=next_url,
+                    )
+                if budget:
+                    stop = budget.consume_page(next_url)
+                    if stop:
+                        return _structured_outcome_artifact(
+                            url,
+                            final_url=next_url,
+                            method=AcquisitionMethod.UNSUPPORTED,
+                            reason=stop,
+                            verification=VerificationState.BLOCKED,
+                            scan_id=scan_id,
+                        )
+                request_url = next_url
             body = resp.text or ""
             art = artifact_from_http(
                 source_url=url,
@@ -209,7 +280,11 @@ async def acquire_page(
             )
         if art.acquisition_method in (AcquisitionMethod.BLOCKED, AcquisitionMethod.ERROR) and snippet_fallback:
             return artifact_from_snippet(
-                source_url=url, snippet=snippet_fallback, title=title, scan_id=scan_id
+                source_url=url,
+                snippet=snippet_fallback,
+                title=title,
+                scan_id=scan_id,
+                destination_failure_reason=art.blocked_reason,
             )
         # Optional Playwright only when explicitly preferred and HTTP looks empty JS shell.
         if (
@@ -221,30 +296,113 @@ async def acquire_page(
         ):
             rendered = await _try_playwright(url, timeout=timeout)
             if rendered is not None:
-                return artifact_from_http(
+                rendered_body, rendered_url = rendered
+                rendered_artifact = artifact_from_http(
                     source_url=url,
-                    body=rendered,
+                    body=rendered_body,
                     status=200,
-                    final_url=url,
+                    final_url=rendered_url,
                     title=title,
                     scan_id=scan_id,
                     budget=budget,
-                ).model_copy(update={"acquisition_method": AcquisitionMethod.PLAYWRIGHT})
+                )
+                # A rendered login/CAPTCHA/error state must retain its blocked
+                # classification instead of being relabeled as successful.
+                if rendered_artifact.acquisition_method == AcquisitionMethod.HTTP:
+                    rendered_artifact.acquisition_method = AcquisitionMethod.PLAYWRIGHT
+                return rendered_artifact
         return art
     except Exception as exc:  # noqa: BLE001 — acquisition errors are structured outcomes
         if snippet_fallback:
             return artifact_from_snippet(
-                source_url=url, snippet=snippet_fallback, title=title, scan_id=scan_id
+                source_url=url,
+                snippet=snippet_fallback,
+                title=title,
+                scan_id=scan_id,
+                destination_failure_reason=f"request_error:{type(exc).__name__}",
             )
-        return PageArtifact(
-            source_url=url,
-            acquisition_method=AcquisitionMethod.ERROR,
-            blocked_reason=f"request_error:{type(exc).__name__}",
+        return _structured_outcome_artifact(
+            url,
+            method=AcquisitionMethod.ERROR,
+            reason=f"request_error:{type(exc).__name__}",
+            verification=VerificationState.ERROR,
             scan_id=scan_id,
         )
 
 
-async def _try_playwright(url: str, timeout: float = 20.0) -> str | None:
+def _rejected_artifact(
+    source_url: str,
+    validation: TargetValidation,
+    *,
+    scan_id: str,
+    final_url: str = "",
+) -> PageArtifact:
+    reason = f"unsafe_target:{validation.reason or 'not_public'}"
+    evidence = EvidenceObservation(
+        kind=EvidenceKind.OBSERVATION,
+        method=AcquisitionMethod.UNSUPPORTED.value,
+        source_url=source_url,
+        blocked_reason=reason,
+        verification=VerificationState.BLOCKED,
+        confidence_reason="public_target_policy",
+    )
+    return PageArtifact(
+        source_url=source_url,
+        final_url=final_url,
+        acquisition_method=AcquisitionMethod.UNSUPPORTED,
+        blocked_reason=reason,
+        evidence_id=evidence.id,
+        scan_id=scan_id,
+        metadata={
+            "evidence": evidence.model_dump(mode="json"),
+            "target_validation": {
+                "host": validation.host,
+                "reason": validation.reason,
+                "resolved_addresses": list(validation.resolved_addresses),
+            },
+        },
+    )
+
+
+def _cancelled_artifact(source_url: str, *, scan_id: str) -> PageArtifact:
+    return _structured_outcome_artifact(
+        source_url=source_url,
+        method=AcquisitionMethod.UNSUPPORTED,
+        reason="cancelled",
+        verification=VerificationState.BLOCKED,
+        scan_id=scan_id,
+    )
+
+
+def _structured_outcome_artifact(
+    source_url: str,
+    *,
+    method: AcquisitionMethod,
+    reason: str,
+    verification: VerificationState,
+    scan_id: str,
+    final_url: str = "",
+) -> PageArtifact:
+    evidence = EvidenceObservation(
+        kind=EvidenceKind.OBSERVATION,
+        method=method.value,
+        source_url=source_url,
+        blocked_reason=reason,
+        verification=verification,
+        confidence_reason="deep_page_analyzer_outcome",
+    )
+    return PageArtifact(
+        source_url=source_url,
+        final_url=final_url,
+        acquisition_method=method,
+        blocked_reason=reason,
+        evidence_id=evidence.id,
+        scan_id=scan_id,
+        metadata={"evidence": evidence.model_dump(mode="json")},
+    )
+
+
+async def _try_playwright(url: str, timeout: float = 20.0) -> tuple[str, str] | None:
     try:
         from playwright.async_api import async_playwright
     except Exception:
@@ -252,10 +410,26 @@ async def _try_playwright(url: str, timeout: float = 20.0) -> str | None:
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            context = await browser.new_context()
+
+            async def guard(route) -> None:
+                request_url = route.request.url
+                validation = await validate_public_target_async(request_url)
+                if validation.allowed:
+                    await route.continue_()
+                else:
+                    await route.abort("blockedbyclient")
+
+            await context.route("**/*", guard)
+            page = await context.new_page()
             await page.goto(url, wait_until="domcontentloaded", timeout=int(timeout * 1000))
+            final_validation = await validate_public_target_async(page.url)
+            if not final_validation.allowed:
+                await browser.close()
+                return None
             content = await page.content()
+            final_url = page.url
             await browser.close()
-            return content
+            return content, final_url
     except Exception:
         return None

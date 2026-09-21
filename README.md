@@ -17,6 +17,8 @@ CyberMirror can:
 - query Have I Been Pwned when the user supplies an API key;
 - inspect public WHOIS/domain information;
 - correlate findings into a relationship graph;
+- safely acquire eligible public result pages for evidence-backed deep analysis;
+- preserve evidence lineage across entities, hypotheses, travel events, timelines, and journals;
 - store scan history locally;
 - compare scans and export reports.
 

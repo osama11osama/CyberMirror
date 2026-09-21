@@ -19,6 +19,7 @@ from app.models.schemas import Finding, IdentityProfile, ScanDetail, ScanStartRe
 from app.modules.identity.correlator import correlate_findings
 from app.modules.registry import DEFAULT_MODULES, get_module
 from app.services.risk_engine import analyze_finding, compute_risk_score
+from app.services.investigation_budget import clear_budget, default_budget, get_budget
 from app.services.runtime_settings import get_enabled_modules
 from app.storage.database import (
     create_scan,
@@ -59,6 +60,7 @@ class ScanEngine:
         modules = _resolve_modules(modules)
         scan_id = create_scan(profile, modules)
         create_job(scan_id, modules)
+        default_budget(scan_id)
         return ScanStartResponse(
             id=scan_id,
             status="running",
@@ -90,6 +92,11 @@ class ScanEngine:
             logger.exception("Scan %s failed", scan_id[:8])
             fail_job(scan_id, str(exc))
             update_scan_status(scan_id, "failed", 0, 0)
+        finally:
+            budget = get_budget(scan_id)
+            if budget is not None:
+                update_job(scan_id, investigation_budget=budget.as_dict())
+            clear_budget(scan_id)
 
     async def run_scan(
         self, profile: IdentityProfile, modules: list[str] | None = None
@@ -203,4 +210,7 @@ class ScanEngine:
             job = get_job(scan_id)
             if not job or job.get("status") != "running":
                 return False
+        budget = get_budget(scan_id)
+        if budget is not None:
+            budget.cancel()
         return cancel_job(scan_id)
