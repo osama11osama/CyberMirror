@@ -815,7 +815,7 @@ def export_scan(scan_id: str, body: ExportRequest):
 
     elif ext == "csv":
 
-        export_csv(findings, path)
+        export_csv(findings, path, intelligence=intel)
 
     elif ext == "html":
 
@@ -887,7 +887,7 @@ def download_export(scan_id: str, format: str):
 
     elif ext == "csv":
 
-        export_csv(findings, path)
+        export_csv(findings, path, intelligence=intel)
 
     elif ext == "html":
 

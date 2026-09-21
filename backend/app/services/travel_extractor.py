@@ -67,6 +67,9 @@ def extract_travel_events(
             year=int(month.group(2)),
             month=_MONTHS[month.group(1).lower()],
         )
+    else:
+        # Accommodation keywords alone are not enough — require an explicit stay date.
+        return []
 
     # Publication date separate — never copy stay into publication.
     pub = parse_fuzzy_date()
