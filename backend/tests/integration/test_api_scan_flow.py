@@ -116,6 +116,14 @@ def test_intelligence_route_acquires_url_only_finding(isolated_app, monkeypatch)
 
     monkeypatch.setattr(ScanEngine, "_execute_modules", fake_execute)
     monkeypatch.setattr("app.services.intelligence_pipeline.acquire_page", fake_acquire)
+
+    async def no_live_search(query: str, max_results: int):
+        return []
+
+    monkeypatch.setattr(
+        "app.services.query_executor.default_web_search",
+        no_live_search,
+    )
     response = client.post(
         "/api/scans",
         headers=headers,

@@ -26,7 +26,7 @@ def test_redact_intelligence_artifacts_clears_main_text(tmp_path, monkeypatch):
         raw={"page_text": "Posted by: jane\nStayed June 2026 in Lisbon. Secret body text."},
     )
     db.save_findings([finding])
-    payload = analyze_finding_pages(profile, [finding], scan_id=scan_id)
+    payload = analyze_finding_pages(profile, [finding], scan_id=scan_id, execute_queries=False)
     db.save_intelligence(scan_id, payload)
     assert any((a.get("main_text") or "") for a in payload.get("artifacts") or [])
 

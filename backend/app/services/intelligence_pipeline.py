@@ -1,4 +1,4 @@
-"""Deep intelligence pipeline orchestrator (v2.5)."""
+"""Deep intelligence pipeline orchestrator (v2.5 / v2.5.1)."""
 
 from __future__ import annotations
 
@@ -33,9 +33,21 @@ from app.services.page_analyzer import (
     acquire_page,
     artifact_from_http,
 )
-from app.services.query_planner import build_investigation_plan
+from app.services.pivot_engine import PivotEngineState, next_pivot_queries
+from app.services.query_executor import (
+    SearchFn,
+    canonicalize_result_url,
+    execute_planned_query,
+)
+from app.services.query_planner import (
+    PlannedQuery,
+    QueryState,
+    build_investigation_plan,
+)
 from app.services.timeline_builder import build_timeline
 from app.services.travel_extractor import extract_travel_events
+
+_norm_query = lambda q: " ".join((q or "").lower().split())
 
 
 async def analyze_finding_pages_async(
@@ -45,8 +57,11 @@ async def analyze_finding_pages_async(
     scan_id: str = "",
     budget: InvestigationBudget | None = None,
     max_pages: int = 12,
+    execute_queries: bool = True,
+    max_seed_queries: int = 6,
+    search_fn: SearchFn | None = None,
 ) -> dict:
-    """Analyze findings, acquiring eligible public URLs when content is absent."""
+    """Analyze findings, optionally executing structured queries and pivots."""
     budget = budget or get_budget(scan_id) or default_budget(scan_id)
     journal = InvestigationJournal(scan_id=scan_id)
     seed_ents = seed_entities_from_profile(profile, scan_id=scan_id)
@@ -60,8 +75,9 @@ async def analyze_finding_pages_async(
     )
 
     plan = build_investigation_plan(profile)
-    for pq in plan[:8]:
-        journal.add(
+    query_step_by_id: dict[str, str] = {}
+    for pq in plan[:12]:
+        step = journal.add(
             JournalStep(
                 parent_ids=[seed_step.id],
                 step_type=JournalStepType.QUERY,
@@ -70,130 +86,300 @@ async def analyze_finding_pages_async(
                 metadata={
                     "query": pq.query,
                     "family": pq.family.value,
-                    "state": "planned",
+                    "state": pq.state.value,
+                    "priority": pq.priority,
+                    "depth": pq.depth,
                 },
             )
         )
+        query_step_by_id[pq.id] = step.id
+
+    pivot_state = PivotEngineState()
+    executed_plan: list[PlannedQuery] = []
+    work_findings: list[Finding] = []
+
+    def _offer_finding(finding: Finding) -> bool:
+        canon = canonicalize_result_url(finding.url)
+        if not canon or canon in pivot_state.visited_urls:
+            return False
+        pivot_state.visited_urls.add(canon)
+        work_findings.append(finding)
+        return True
+
+    for finding in findings:
+        if finding.url and finding.platform not in ("Summary", "System", "Correlation Engine"):
+            _offer_finding(finding)
+
+    if execute_queries:
+        seed_queries = sorted(
+            [p for p in plan if p.depth == 0],
+            key=lambda p: (p.priority, p.query),
+        )[: max(0, max_seed_queries)]
+        for pq in seed_queries:
+            stop = budget.check_continue()
+            if stop or budget.is_cancelled():
+                pq.state = (
+                    QueryState.CANCELLED
+                    if budget.is_cancelled() or stop == "cancelled"
+                    else QueryState.SKIPPED
+                )
+                _update_query_journal(journal, query_step_by_id, pq, status="stopped")
+                break
+            nq = _norm_query(pq.query)
+            if nq in pivot_state.executed_queries:
+                pq.state = QueryState.SKIPPED
+                _update_query_journal(journal, query_step_by_id, pq, status="deduped")
+                continue
+            parent_id = query_step_by_id.get(pq.id, seed_step.id)
+            journal.add(
+                JournalStep(
+                    parent_ids=[parent_id],
+                    step_type=JournalStepType.QUERY,
+                    reason=f"Execute seed query: {pq.reason}",
+                    output_refs=[pq.id],
+                    metadata={"query": pq.query, "state": "running", "depth": 0},
+                )
+            )
+            results = await execute_planned_query(
+                pq,
+                scan_id=scan_id,
+                budget=budget,
+                search_fn=search_fn,
+                consume_budget=True,
+            )
+            pivot_state.executed_queries.add(nq)
+            executed_plan.append(pq)
+            _update_query_journal(
+                journal,
+                query_step_by_id,
+                pq,
+                status=pq.state.value,
+                parent_ids=[parent_id],
+                result_count=len(results),
+            )
+            for result in results:
+                if _offer_finding(result):
+                    journal.add(
+                        JournalStep(
+                            parent_ids=[parent_id],
+                            step_type=JournalStepType.SEARCH_RESULT,
+                            reason="Planned query search result",
+                            input_refs=[pq.id],
+                            output_refs=[result.id],
+                            metadata={"url": result.url, "query": pq.query},
+                        )
+                    )
 
     artifacts: list[PageArtifact] = []
     entities: list[Entity] = list(seed_ents)
     events: list[Event] = []
     entities_by_artifact: dict[str, list[Entity]] = {}
     acquisition_step_by_artifact: dict[str, str] = {}
+    observed_entities: list[Entity] = []
 
-    candidates = [
-        f
-        for f in findings
-        if f.url and f.platform not in ("Summary", "System", "Correlation Engine")
-    ][:max_pages]
+    cursor = 0
+    pages_acquired = 0
 
-    for f in candidates:
-        stop = budget.check_continue()
-        if stop or budget.is_cancelled():
-            journal.add(
+    async def _process_queued_findings(parent_hint: str = seed_step.id) -> None:
+        nonlocal cursor, pages_acquired
+        while cursor < len(work_findings):
+            if pages_acquired >= max_pages:
+                break
+            stop = budget.check_continue()
+            if stop or budget.is_cancelled():
+                journal.add(
+                    JournalStep(
+                        step_type=JournalStepType.BLOCKED,
+                        reason=stop or "cancelled",
+                        status="stopped",
+                    )
+                )
+                break
+
+            finding = work_findings[cursor]
+            cursor += 1
+
+            result_step = journal.add(
                 JournalStep(
-                    step_type=JournalStepType.BLOCKED,
-                    reason=stop or "cancelled",
-                    status="stopped",
+                    parent_ids=[parent_hint],
+                    step_type=JournalStepType.SEARCH_RESULT,
+                    reason="Public search result selected for deep analysis",
+                    input_refs=[finding.id],
+                    output_refs=[finding.id],
+                    metadata={"url": finding.url, "platform": finding.platform},
                 )
             )
-            break
 
-        result_step = journal.add(
-            JournalStep(
-                parent_ids=[seed_step.id],
-                step_type=JournalStepType.SEARCH_RESULT,
-                reason="Public search result selected for deep analysis",
-                input_refs=[f.id],
-                output_refs=[f.id],
-                metadata={"url": f.url, "platform": f.platform},
+            raw_body = ""
+            if isinstance(finding.raw, dict):
+                raw_body = str(finding.raw.get("page_text") or finding.raw.get("body") or "")
+            snippet = finding.snippet or finding.description or ""
+
+            if raw_body:
+                if budget.consume_page(finding.url):
+                    break
+                art = artifact_from_http(
+                    source_url=finding.url,
+                    body=raw_body,
+                    status=200,
+                    title=finding.title,
+                    scan_id=scan_id,
+                    budget=budget,
+                )
+            else:
+                art = await acquire_page(
+                    finding.url,
+                    scan_id=scan_id,
+                    budget=budget,
+                    prefer_playwright=settings.playwright_enabled,
+                    snippet_fallback=snippet,
+                    title=finding.title,
+                )
+
+            artifacts.append(art)
+            pages_acquired += 1
+            art.metadata.setdefault("platform", finding.platform)
+            parent = journal.add(
+                JournalStep(
+                    parent_ids=[result_step.id],
+                    step_type=JournalStepType.ACQUISITION
+                    if art.acquisition_method
+                    not in (
+                        AcquisitionMethod.BLOCKED,
+                        AcquisitionMethod.ERROR,
+                        AcquisitionMethod.UNSUPPORTED,
+                    )
+                    else JournalStepType.BLOCKED,
+                    reason=f"Acquire {art.acquisition_method.value}",
+                    input_refs=[finding.id],
+                    output_refs=[art.id],
+                    metadata={"url": finding.url, "method": art.acquisition_method.value},
+                    status="ok" if not art.blocked_reason else "blocked",
+                )
             )
-        )
+            acquisition_step_by_artifact[art.id] = parent.id
 
-        raw_body = ""
-        if isinstance(f.raw, dict):
-            raw_body = str(f.raw.get("page_text") or f.raw.get("body") or "")
-        snippet = f.snippet or f.description or ""
+            destination_failure = art.metadata.get("destination_failure_reason")
+            if destination_failure:
+                journal.add(
+                    JournalStep(
+                        parent_ids=[parent.id],
+                        step_type=JournalStepType.BLOCKED,
+                        reason=str(destination_failure),
+                        input_refs=[finding.id],
+                        output_refs=[art.id],
+                        metadata={"fallback": "search_snippet"},
+                        status="fallback",
+                    )
+                )
 
-        if raw_body:
-            if budget.consume_page(f.url):
-                break
-            art = artifact_from_http(
-                source_url=f.url,
-                body=raw_body,
-                status=200,
-                title=f.title,
-                scan_id=scan_id,
-                budget=budget,
-            )
-        else:
-            art = await acquire_page(
-                f.url,
-                scan_id=scan_id,
-                budget=budget,
-                prefer_playwright=settings.playwright_enabled,
-                snippet_fallback=snippet,
-                title=f.title,
-            )
+            if art.blocked_reason:
+                continue
 
-        artifacts.append(art)
-        art.metadata.setdefault("platform", f.platform)
-        parent = journal.add(
-            JournalStep(
-                parent_ids=[result_step.id],
-                step_type=JournalStepType.ACQUISITION
-                if art.acquisition_method
-                not in (AcquisitionMethod.BLOCKED, AcquisitionMethod.ERROR, AcquisitionMethod.UNSUPPORTED)
-                else JournalStepType.BLOCKED,
-                reason=f"Acquire {art.acquisition_method.value}",
-                input_refs=[f.id],
-                output_refs=[art.id],
-                metadata={"url": f.url, "method": art.acquisition_method.value},
-                status="ok" if not art.blocked_reason else "blocked",
-            )
-        )
-        acquisition_step_by_artifact[art.id] = parent.id
-
-        destination_failure = art.metadata.get("destination_failure_reason")
-        if destination_failure:
-            journal.add(
+            ents, acts = extract_activities(art)
+            entities_by_artifact[art.id] = ents
+            entities.extend(ents)
+            observed_entities.extend(ents)
+            events.extend(acts)
+            entity_step = journal.add(
                 JournalStep(
                     parent_ids=[parent.id],
-                    step_type=JournalStepType.BLOCKED,
-                    reason=str(destination_failure),
-                    input_refs=[f.id],
-                    output_refs=[art.id],
-                    metadata={"fallback": "search_snippet"},
-                    status="fallback",
+                    step_type=JournalStepType.ENTITY_EXTRACTION,
+                    reason="Extract structured entities",
+                    input_refs=[art.id, art.evidence_id],
+                    output_refs=[e.id for e in ents],
+                    metadata={"count": len(ents)},
+                )
+            )
+            journal.add(
+                JournalStep(
+                    parent_ids=[entity_step.id],
+                    step_type=JournalStepType.ACTIVITY_EXTRACTION,
+                    reason="Extract authored activity",
+                    input_refs=[art.id],
+                    output_refs=[e.id for e in ents] + [a.id for a in acts],
                 )
             )
 
-        if art.blocked_reason:
-            continue
+    await _process_queued_findings()
 
-        ents, acts = extract_activities(art)
-        entities_by_artifact[art.id] = ents
-        entities.extend(ents)
-        events.extend(acts)
-        entity_step = journal.add(
-            JournalStep(
-                parent_ids=[parent.id],
-                step_type=JournalStepType.ENTITY_EXTRACTION,
-                reason="Extract structured entities",
-                input_refs=[art.id, art.evidence_id],
-                output_refs=[e.id for e in ents],
-                metadata={"count": len(ents)},
+    # Bounded recursive pivots: strong/medium discoveries → contextual queries.
+    if execute_queries:
+        while True:
+            stop = budget.check_continue()
+            if stop or budget.is_cancelled():
+                journal.add(
+                    JournalStep(
+                        step_type=JournalStepType.BLOCKED,
+                        reason=stop or "cancelled",
+                        status="stopped",
+                    )
+                )
+                break
+
+            pivots = next_pivot_queries(profile, observed_entities, budget, pivot_state)
+            if not pivots:
+                break
+
+            pivot_parent = journal.add(
+                JournalStep(
+                    step_type=JournalStepType.PIVOT,
+                    reason="Strong/medium discoveries produced contextual follow-ups",
+                    output_refs=[p.id for p in pivots],
+                    metadata={
+                        "depth": pivot_state.depth,
+                        "count": len(pivots),
+                        "queries": [p.query for p in pivots],
+                    },
+                )
             )
-        )
-        journal.add(
-            JournalStep(
-                parent_ids=[entity_step.id],
-                step_type=JournalStepType.ACTIVITY_EXTRACTION,
-                reason="Extract authored activity",
-                input_refs=[art.id],
-                output_refs=[e.id for e in ents] + [a.id for a in acts],
-            )
-        )
+            for pq in pivots:
+                query_step_by_id[pq.id] = pivot_parent.id
+                journal.add(
+                    JournalStep(
+                        parent_ids=[pivot_parent.id],
+                        step_type=JournalStepType.QUERY,
+                        reason=pq.reason,
+                        output_refs=[pq.id],
+                        metadata={
+                            "query": pq.query,
+                            "family": pq.family.value,
+                            "state": "running",
+                            "depth": pq.depth,
+                            "pivot_entity_id": pq.pivot_entity_id,
+                        },
+                    )
+                )
+                results = await execute_planned_query(
+                    pq,
+                    scan_id=scan_id,
+                    budget=budget,
+                    search_fn=search_fn,
+                    consume_budget=False,
+                )
+                executed_plan.append(pq)
+                _update_query_journal(
+                    journal,
+                    query_step_by_id,
+                    pq,
+                    status=pq.state.value,
+                    parent_ids=[pivot_parent.id],
+                    result_count=len(results),
+                )
+                for result in results:
+                    if _offer_finding(result):
+                        journal.add(
+                            JournalStep(
+                                parent_ids=[pivot_parent.id],
+                                step_type=JournalStepType.SEARCH_RESULT,
+                                reason="Contextual pivot search result",
+                                input_refs=[pq.id],
+                                output_refs=[result.id],
+                                metadata={"url": result.url, "query": pq.query, "depth": pq.depth},
+                            )
+                        )
+
+            await _process_queued_findings(parent_hint=pivot_parent.id)
 
     clusters = cluster_artifacts(artifacts)
     cluster_step_by_id: dict[str, str] = {}
@@ -327,6 +513,13 @@ async def analyze_finding_pages_async(
     )
     bundle = IntelligenceBundle(entities=entities, events=events)
 
+    # Prefer executed copies; fall back to the original plan for transparency.
+    by_id = {p.id: p for p in plan}
+    for p in executed_plan:
+        by_id[p.id] = p
+    query_plan_out = list(by_id.values())
+    query_plan_out.sort(key=lambda p: (p.depth, p.priority, p.query))
+
     return {
         "bundle": bundle.model_dump(mode="json"),
         "artifacts": [a.model_dump(mode="json") for a in artifacts],
@@ -337,9 +530,46 @@ async def analyze_finding_pages_async(
             "unknown_date": [e.model_dump(mode="json") for e in unknown],
         },
         "journal": journal.model_dump(mode="json"),
-        "query_plan": [p.model_dump(mode="json") for p in plan],
+        "query_plan": [p.model_dump(mode="json") for p in query_plan_out],
+        "executed_queries": [p.model_dump(mode="json") for p in executed_plan],
         "budget": budget.as_dict(),
+        "pivot_state": {
+            "depth": pivot_state.depth,
+            "executed_query_count": len(pivot_state.executed_queries),
+            "visited_url_count": len(pivot_state.visited_urls),
+        },
     }
+
+
+def _update_query_journal(
+    journal: InvestigationJournal,
+    query_step_by_id: dict[str, str],
+    planned: PlannedQuery,
+    *,
+    status: str,
+    parent_ids: list[str] | None = None,
+    result_count: int | None = None,
+) -> None:
+    parents = parent_ids or ([query_step_by_id[planned.id]] if planned.id in query_step_by_id else [])
+    meta: dict = {
+        "query": planned.query,
+        "family": planned.family.value,
+        "state": planned.state.value,
+        "status": status,
+        "depth": planned.depth,
+    }
+    if result_count is not None:
+        meta["result_count"] = result_count
+    journal.add(
+        JournalStep(
+            parent_ids=parents,
+            step_type=JournalStepType.QUERY,
+            reason=f"Query {planned.state.value}: {planned.reason}",
+            output_refs=[planned.id],
+            metadata=meta,
+            status=status,
+        )
+    )
 
 
 def analyze_finding_pages(
@@ -349,6 +579,9 @@ def analyze_finding_pages(
     scan_id: str = "",
     budget: InvestigationBudget | None = None,
     max_pages: int = 12,
+    execute_queries: bool = True,
+    max_seed_queries: int = 6,
+    search_fn: SearchFn | None = None,
 ) -> dict:
     """Synchronous compatibility wrapper for API threadpool and older callers."""
     coroutine = analyze_finding_pages_async(
@@ -357,6 +590,9 @@ def analyze_finding_pages(
         scan_id=scan_id,
         budget=budget,
         max_pages=max_pages,
+        execute_queries=execute_queries,
+        max_seed_queries=max_seed_queries,
+        search_fn=search_fn,
     )
     try:
         asyncio.get_running_loop()

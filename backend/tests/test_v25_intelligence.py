@@ -210,7 +210,7 @@ def test_full_pipeline_and_report_escaping():
         snippet="Stayed June 2026",
         raw={"page_text": REVIEW_BODY},
     )
-    payload = analyze_finding_pages(profile, [finding], scan_id="scan-x")
+    payload = analyze_finding_pages(profile, [finding], scan_id="scan-x", execute_queries=False)
     assert payload["bundle"]["entities"]
     assert payload["journal"]["steps"]
     assert payload["timeline"]

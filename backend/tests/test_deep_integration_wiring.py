@@ -50,6 +50,7 @@ async def test_pipeline_acquires_url_only_finding(monkeypatch):
         [Finding(platform="Web", title="Review", url="https://public.example/review")],
         scan_id="acquire",
         budget=budget,
+        execute_queries=False,
     )
     assert calls == [("https://public.example/review", budget)]
     assert payload["artifacts"][0]["acquisition_method"] == "http"
@@ -125,6 +126,7 @@ async def test_pipeline_uses_identity_for_travel_and_suppresses_mirror():
         findings,
         scan_id="lineage",
         budget=InvestigationBudget(scan_id="lineage"),
+        execute_queries=False,
     )
     travel = [event for event in payload["bundle"]["events"] if event["type"] == "travel"]
     assert len(travel) == 1
