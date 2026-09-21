@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.models.intelligence import DatePrecision, Event, EventType, FuzzyDate
 from app.services.evidence_clustering import EvidenceCluster
+from app.services.evidence_lineage import EvidenceLineageIndex
 from app.services.identity_hypotheses import HypothesisStatus, IdentityHypothesis
+from app.services.page_analyzer import PageArtifact
 
 
 class TimelineEntry(BaseModel):
@@ -45,6 +47,7 @@ def build_timeline(
     *,
     hypotheses: list[IdentityHypothesis] | None = None,
     clusters: list[EvidenceCluster] | None = None,
+    artifacts: list[PageArtifact] | None = None,
     event_types: set[str] | None = None,
     min_confidence: float = 0.0,
 ) -> tuple[list[TimelineEntry], list[TimelineEntry]]:
@@ -54,11 +57,9 @@ def build_timeline(
         for eid in h.supporting_evidence_ids:
             hyp_by_evidence[eid] = h
 
-    # Map evidence → independent count via clusters.
-    indep_by_evidence: dict[str, int] = {}
-    for c in clusters or []:
-        for mid in c.member_artifact_ids:
-            indep_by_evidence[mid] = c.independent_source_count
+    # Translate evidence -> artifact -> cluster explicitly.  These IDs are
+    # distinct namespaces and must never be compared directly.
+    lineage = EvidenceLineageIndex.build(artifacts or [], clusters or [])
 
     dated: list[TimelineEntry] = []
     unknown: list[TimelineEntry] = []
@@ -90,9 +91,7 @@ def build_timeline(
                     label = h.status.value
                 break
 
-        indep = 1
-        for eid in ev.supporting_evidence_ids:
-            indep = max(indep, indep_by_evidence.get(eid, 1))
+        indep = lineage.independent_count(ev.supporting_evidence_ids)
 
         entry = TimelineEntry(
             event_id=ev.id,
