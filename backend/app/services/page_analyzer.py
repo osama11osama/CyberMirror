@@ -104,15 +104,22 @@ def detect_block_or_challenge(text: str, status: int | None = None) -> str | Non
 
 
 def prepare_main_text(html_or_text: str, budget: InvestigationBudget | None = None) -> str:
-    """Strip crude chrome and cap size — not a full readability engine."""
+    """Strip crude chrome and cap size — not a full readability engine.
+
+    Newlines are preserved so multi-author forum blocks remain separable.
+    """
     text = html_or_text or ""
     # Drop script/style blocks when HTML-ish.
     text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
     text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
     text = re.sub(r"(?is)<nav[^>]*>.*?</nav>", " ", text)
     text = re.sub(r"(?is)<footer[^>]*>.*?</footer>", " ", text)
+    text = re.sub(r"(?is)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?is)</p\s*>", "\n", text)
+    text = re.sub(r"(?is)</div\s*>", "\n", text)
     text = re.sub(r"(?is)<[^>]+>", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"[^\S\n]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if budget:
         return budget.cap_content(text)
     return text[:400_000]
@@ -140,6 +147,9 @@ def artifact_from_http(
             budget.record_blocked(source_url)
     else:
         main = prepare_main_text(body, budget)
+    from app.services.structured_page import parse_structured_signals
+
+    structured = parse_structured_signals(body or "")
     evidence = EvidenceObservation(
         kind=EvidenceKind.OBSERVATION,
         method=method.value,
@@ -162,7 +172,17 @@ def artifact_from_http(
         blocked_reason=reason,
         evidence_id=evidence.id,
         scan_id=scan_id,
-        metadata={"evidence": evidence.model_dump(mode="json")},
+        metadata={
+            "evidence": evidence.model_dump(mode="json"),
+            "structured": {
+                "organizations": structured.organizations[:12],
+                "products": structured.products[:12],
+                "locations": structured.locations[:12],
+                "authors": structured.authors[:12],
+                "social_profiles": structured.social_profiles[:12],
+                "vehicles": structured.vehicles[:12],
+            },
+        },
     )
 
 

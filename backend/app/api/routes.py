@@ -566,12 +566,62 @@ def _intelligence_for_scan(scan_id: str, *, refresh: bool = False) -> dict:
 
 
 @router.get("/scans/{scan_id}/timeline")
+def scan_timeline(
+    scan_id: str,
+    event_type: str | None = None,
+    platform: str | None = None,
+    location: str | None = None,
+    min_confidence: float | None = None,
+    verification: str | None = None,
+    origin: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+):
+    from datetime import date as date_cls
 
-def scan_timeline(scan_id: str):
+    from app.services.timeline_builder import TimelineEntry, filter_timeline_entries
 
     intel = _intelligence_for_scan(scan_id, refresh=False)
+    timeline = intel.get("timeline") or {"dated": [], "unknown_date": []}
+    dated = [TimelineEntry.model_validate(e) for e in timeline.get("dated") or []]
+    unknown = [TimelineEntry.model_validate(e) for e in timeline.get("unknown_date") or []]
 
-    return intel.get("timeline") or {"dated": [], "unknown_date": []}
+    def _parse(value: str | None):
+        if not value:
+            return None
+        try:
+            return date_cls.fromisoformat(value[:10])
+        except ValueError:
+            return None
+
+    if any(
+        [
+            event_type,
+            platform,
+            location,
+            min_confidence is not None,
+            verification,
+            origin,
+            date_from,
+            date_to,
+        ]
+    ):
+        dated, unknown = filter_timeline_entries(
+            dated,
+            unknown,
+            event_type=event_type,
+            platform=platform,
+            location=location,
+            min_confidence=min_confidence,
+            verification=verification,
+            origin=origin,
+            date_from=_parse(date_from),
+            date_to=_parse(date_to),
+        )
+    return {
+        "dated": [e.model_dump(mode="json") for e in dated],
+        "unknown_date": [e.model_dump(mode="json") for e in unknown],
+    }
 
 
 

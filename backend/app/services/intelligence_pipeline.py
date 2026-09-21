@@ -37,7 +37,7 @@ from app.services.page_analyzer import (
     acquire_page,
     artifact_from_http,
 )
-from app.services.pivot_engine import PivotEngineState, next_pivot_queries
+from app.services.pivot_engine import PivotEngineState, PivotStrength, next_pivot_queries, score_pivot
 from app.services.query_executor import (
     SearchFn,
     canonicalize_result_url,
@@ -323,6 +323,34 @@ async def analyze_finding_pages_async(
 
             pivots = next_pivot_queries(profile, observed_entities, budget, pivot_state)
             if not pivots:
+                # Record rejected/weak pivot decisions so the journal explains why
+                # recursion stopped (not only successful pivots).
+                rejected = []
+                for entity in observed_entities:
+                    candidate = score_pivot(entity)
+                    if not candidate:
+                        continue
+                    if candidate.strength == PivotStrength.WEAK:
+                        rejected.append(
+                            {
+                                "entity_id": entity.id,
+                                "strength": candidate.strength.value,
+                                "reason": candidate.reason,
+                            }
+                        )
+                if rejected:
+                    journal.add(
+                        JournalStep(
+                            step_type=JournalStepType.PIVOT,
+                            reason="Weak/generic pivots rejected — no recurse by default",
+                            status="rejected",
+                            metadata={
+                                "rejected_count": len(rejected),
+                                "rejected": rejected[:12],
+                                "depth": pivot_state.depth,
+                            },
+                        )
+                    )
                 break
 
             pivot_parent = journal.add(
@@ -330,10 +358,13 @@ async def analyze_finding_pages_async(
                     step_type=JournalStepType.PIVOT,
                     reason="Strong/medium discoveries produced contextual follow-ups",
                     output_refs=[p.id for p in pivots],
+                    status="accepted",
                     metadata={
                         "depth": pivot_state.depth,
                         "count": len(pivots),
                         "queries": [p.query for p in pivots],
+                        # Bound metadata — never store page bodies here.
+                        "entity_ids": [p.pivot_entity_id for p in pivots if p.pivot_entity_id][:12],
                     },
                 )
             )
