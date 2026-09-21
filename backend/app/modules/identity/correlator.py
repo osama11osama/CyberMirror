@@ -2,7 +2,6 @@
 
 import re
 from collections import defaultdict
-from urllib.parse import urlparse
 
 from app.models.schemas import Finding, FindingCategory, FindingOutcome, IdentityProfile
 from app.models.evidence import (
@@ -11,6 +10,7 @@ from app.models.evidence import (
     VerificationState,
 )
 from app.modules.base import NativeModule
+from app.services.handles import extract_profile_handle
 
 
 class IdentityCorrelatorModule(NativeModule):
@@ -24,20 +24,8 @@ class IdentityCorrelatorModule(NativeModule):
         return correlate_findings(profile, [], scan_id)
 
 
-def _extract_handle(url: str) -> str | None:
-    if not url:
-        return None
-    path = urlparse(url).path.strip("/")
-    if not path:
-        return None
-    parts = path.split("/")
-    for skip in ("in", "u", "user", "profile.php"):
-        if parts and parts[0] == skip:
-            parts = parts[1:]
-    handle = parts[0].lstrip("@") if parts else None
-    if handle and len(handle) >= 2 and handle not in ("search", "watch", "p"):
-        return handle.lower()
-    return None
+def _extract_handle(url: str, expected_username: str | None = None) -> str | None:
+    return extract_profile_handle(url, expected_username=expected_username)
 
 
 def _blob(finding: Finding) -> str:
@@ -94,7 +82,7 @@ def correlate_findings(
 
     for f in credible:
         by_platform[f.platform].append(f)
-        handle = _extract_handle(f.url)
+        handle = _extract_handle(f.url, profile.username or None)
         if handle:
             handle_platforms[handle].add(f.platform)
         if profile.username and profile.username.lower() in _blob(f):
@@ -161,7 +149,7 @@ def correlate_findings(
         if len(platforms) >= 3 and handle != "www":
             support = [
                 f for f in credible
-                if _extract_handle(f.url) == handle
+                if _extract_handle(f.url, profile.username or None) == handle
                 or (profile.username and profile.username.lower() == handle and handle in _blob(f))
             ]
             findings.append(Finding(

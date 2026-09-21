@@ -398,6 +398,8 @@ def scan_detail(scan_id: str):
 
     explanation = compute_exposure_score(findings).as_dict()
 
+    # Detail view always uses the live evidence-aware score so the number and
+    # explanation stay consistent (legacy arithmetic-mean rows are recomputed here).
     return ScanDetail(
 
         id=row["id"],
@@ -412,7 +414,7 @@ def scan_detail(scan_id: str):
 
         finding_count=row["finding_count"],
 
-        risk_score=row["risk_score"],
+        risk_score=explanation["score"],
 
         findings=findings,
 

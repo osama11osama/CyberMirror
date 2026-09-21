@@ -3,26 +3,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from urllib.parse import urlparse
 
 from app.models.evidence import VerificationState
 from app.models.schemas import Finding, FindingOutcome, GraphData, GraphEdge, GraphNode, IdentityProfile
+from app.services.handles import extract_profile_handle
 
 
-def _extract_handle(url: str) -> str | None:
-    if not url:
-        return None
-    path = urlparse(url).path.strip("/")
-    if not path:
-        return None
-    parts = path.split("/")
-    for skip in ("in", "u", "user", "profile.php"):
-        if parts and parts[0] == skip:
-            parts = parts[1:]
-    handle = parts[0].lstrip("@") if parts else None
-    if handle and len(handle) >= 2 and handle not in ("search", "watch", "p"):
-        return handle.lower()
-    return None
+def _extract_handle(url: str, expected_username: str | None = None) -> str | None:
+    return extract_profile_handle(url, expected_username=expected_username)
 
 
 def _is_strong_observation(f: Finding) -> bool:
@@ -179,7 +167,7 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
                 label=f.source or "observed",
             ))
 
-        handle = _extract_handle(f.url or "")
+        handle = _extract_handle(f.url or "", profile.username or None)
         if handle and _is_strong_observation(f):
             handle_to_findings[handle].append((i, f, fid))
 

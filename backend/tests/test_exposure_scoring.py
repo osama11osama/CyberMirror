@@ -87,3 +87,35 @@ def test_explanation_is_inspectable():
     assert result.contributing
     assert result.disclaimer
     assert "heuristic" in result.disclaimer.lower() or "Heuristic" in result.disclaimer
+
+
+def test_derived_correlation_not_counted_as_independent_evidence():
+    observed = _f(
+        title="Email on public page",
+        risk_level=RiskLevel.HIGH,
+        platform="Web",
+        url="https://example.com/profile",
+        source="web_search",
+    )
+    derived = _f(
+        title="Correlated email ↔ name",
+        risk_level=RiskLevel.HIGH,
+        platform="Correlation Engine",
+        source="identity_correlator",
+        url="",
+        raw={"evidence_backed": True, "supporting_finding_ids": [observed.id or "x"]},
+    )
+    base = compute_risk_score([observed])
+    with_derived = compute_risk_score([observed, derived])
+    assert abs(with_derived - base) < 0.01
+    # Platform bonus must not treat Correlation Engine as an independent source
+    another = _f(
+        title="GitHub",
+        risk_level=RiskLevel.MEDIUM,
+        platform="GitHub",
+        url="https://github.com/jane",
+        source="username_scan",
+    )
+    two_obs = compute_risk_score([observed, another])
+    two_plus_derived = compute_risk_score([observed, another, derived])
+    assert abs(two_plus_derived - two_obs) < 0.01

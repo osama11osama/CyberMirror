@@ -278,9 +278,15 @@ export class AppComponent implements OnInit {
       next: () => {
         this.needsUnlock = false;
       },
-      error: () => {
-        sessionStorage.removeItem('cybermirror_api_token');
-        this.needsUnlock = true;
+      error: (err: any) => {
+        const status = err?.status;
+        if (status === 401 || status === 403) {
+          sessionStorage.removeItem('cybermirror_api_token');
+          this.needsUnlock = true;
+          return;
+        }
+        // Transient outages: keep the token; unlock gate stays closed if we already had one.
+        this.backendOk = false;
       },
     });
   }
@@ -301,10 +307,15 @@ export class AppComponent implements OnInit {
         this.needsUnlock = false;
         this.unlockDraft = '';
       },
-      error: () => {
+      error: (err: any) => {
         this.unlockBusy = false;
-        sessionStorage.removeItem('cybermirror_api_token');
-        this.unlockError = 'Invalid token. Check data/.api_token and try again.';
+        const status = err?.status;
+        if (status === 401 || status === 403) {
+          sessionStorage.removeItem('cybermirror_api_token');
+          this.unlockError = 'Invalid token. Check data/.api_token and try again.';
+          return;
+        }
+        this.unlockError = 'Backend temporarily unavailable — token was kept. Try again.';
       },
     });
   }
