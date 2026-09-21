@@ -37,3 +37,33 @@ def test_redact_intelligence_artifacts_clears_main_text(tmp_path, monkeypatch):
     for art in loaded.get("artifacts") or []:
         assert art.get("main_text") == ""
         assert art.get("content_redacted") is True
+
+
+def test_redact_persists_metadata_only_artifacts(tmp_path, monkeypatch):
+    """Artifacts with empty main_text but metadata.body must still be saved."""
+    monkeypatch.setattr(settings, "database_path", tmp_path / "intel-meta.sqlite3")
+    monkeypatch.setattr(settings, "encryption_enabled", False)
+    db.init_db()
+    profile = IdentityProfile(username="jane")
+    scan_id = db.create_scan(profile, ["web_search"])
+    db.update_scan_status(scan_id, "completed", finding_count=0, risk_score=0.0)
+    db.save_intelligence(
+        scan_id,
+        {
+            "artifacts": [
+                {
+                    "id": "a1",
+                    "main_text": "",
+                    "metadata": {"raw_html": "<html>secret</html>", "body": "secret body"},
+                }
+            ]
+        },
+    )
+    n = db.redact_intelligence_artifacts(scan_id)
+    assert n == 1
+    loaded = db.load_intelligence(scan_id)
+    assert loaded is not None
+    art = loaded["artifacts"][0]
+    assert "raw_html" not in (art.get("metadata") or {})
+    assert "body" not in (art.get("metadata") or {})
+    assert art.get("content_redacted") is True
