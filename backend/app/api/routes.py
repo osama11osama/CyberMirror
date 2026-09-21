@@ -543,12 +543,14 @@ def _intelligence_for_scan(scan_id: str, *, refresh: bool = False) -> dict:
     findings = [row_to_finding(f) for f in data["findings"]]
 
     from app.services.intelligence_pipeline import analyze_finding_pages
+    from app.services.investigation_budget import clear_budget
 
-    payload = analyze_finding_pages(profile, findings, scan_id=scan_id)
-
-    save_intelligence(scan_id, payload)
-
-    return payload
+    try:
+        payload = analyze_finding_pages(profile, findings, scan_id=scan_id)
+        save_intelligence(scan_id, payload)
+        return payload
+    finally:
+        clear_budget(scan_id)
 
 
 

@@ -27,6 +27,14 @@ Central `InvestigationBudget` enforces:
 
 Every search, acquisition, and pivot module must consult this budget.
 
+One active budget is registered per running scan/investigation. Cancellation marks that budget cancelled before the job is stopped, and completion/failure/cancellation removes it from the active registry after retaining summary counters in the job or intelligence payload. The former `allowed_seed_identifiers` field was removed because it was not an enforced security boundary; investigation scope comes from the explicit profile and operational work is bounded by the budget.
+
+## Public-target / SSRF protection
+
+Automatic page acquisition accepts only public `http` and `https` targets. Before each direct request, redirect, and Playwright request, CyberMirror resolves the hostname and rejects localhost, private/ULA, loopback, link-local, multicast, unspecified, reserved, metadata-style, mixed public/private DNS answers, user-info URLs, and non-HTTP schemes. Rejections become structured blocked/unsupported artifacts with an explanation.
+
+DNS validation cannot completely remove the time-of-check/time-of-use window if a hostile DNS server changes its answer before the HTTP client connects. Deployments needing a stronger boundary should also enforce network-level egress rules. Redirects are followed manually and revalidated rather than delegated to an unrestricted client.
+
 ## Data minimization
 
 - Prefer bounded excerpts and structured facts over full page copies

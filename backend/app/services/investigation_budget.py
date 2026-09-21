@@ -27,7 +27,6 @@ class InvestigationBudget:
     """Central budget consumed by search, acquisition, and pivot code."""
 
     scan_id: str
-    allowed_seed_identifiers: set[str] = field(default_factory=set)
     max_pivot_depth: int = 2
     max_generated_queries: int = 40
     max_pages_total: int = 60
@@ -146,11 +145,15 @@ _budgets: dict[str, InvestigationBudget] = {}
 _budgets_lock = threading.Lock()
 
 
-def default_budget(scan_id: str, seed_identifiers: set[str] | None = None) -> InvestigationBudget:
-    budget = InvestigationBudget(
-        scan_id=scan_id,
-        allowed_seed_identifiers=set(seed_identifiers or ()),
-    )
+def default_budget(scan_id: str) -> InvestigationBudget:
+    """Create and register the sole active budget for an investigation.
+
+    The former ``allowed_seed_identifiers`` field was removed because no
+    production stage enforced it; retaining it implied a scope boundary that
+    did not exist.  Scope is represented by the explicit profile passed to the
+    query planner, while this object enforces operational limits.
+    """
+    budget = InvestigationBudget(scan_id=scan_id)
     with _budgets_lock:
         _budgets[scan_id] = budget
     return budget
