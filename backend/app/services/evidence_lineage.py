@@ -73,3 +73,51 @@ def independent_sources_by_entity(
         )
         for entity in entities
     }
+
+
+def coalesce_identity_entities(entities: list[Entity]) -> list[Entity]:
+    """Merge duplicate handle/email/social entities and union their evidence IDs.
+
+    Confidence/independent-source math must not credit multiple sources while
+    ``supporting_evidence_ids`` only lists one page.
+    """
+    from app.models.intelligence import EntityType
+
+    identity_types = {
+        EntityType.HANDLE,
+        EntityType.EMAIL,
+        EntityType.SOCIAL_ACCOUNT,
+    }
+    coalesced: list[Entity] = []
+    groups: dict[tuple[str, str], Entity] = {}
+    for entity in entities:
+        if entity.type not in identity_types:
+            coalesced.append(entity)
+            continue
+        key = (entity.type.value, entity.normalized_value)
+        existing = groups.get(key)
+        if existing is None:
+            copy = entity.model_copy(deep=True)
+            copy.supporting_evidence_ids = list(
+                dict.fromkeys(entity.supporting_evidence_ids)
+            )
+            groups[key] = copy
+            coalesced.append(copy)
+            continue
+        merged = list(
+            dict.fromkeys(
+                existing.supporting_evidence_ids + entity.supporting_evidence_ids
+            )
+        )
+        existing.supporting_evidence_ids = merged
+        # Keep the stronger confidence / richer context when merging.
+        if entity.confidence > existing.confidence:
+            existing.confidence = entity.confidence
+            existing.original_value = entity.original_value or existing.original_value
+            existing.supporting_context = (
+                entity.supporting_context or existing.supporting_context
+            )
+            existing.extraction_method = (
+                entity.extraction_method or existing.extraction_method
+            )
+    return coalesced

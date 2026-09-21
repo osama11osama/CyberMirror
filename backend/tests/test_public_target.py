@@ -175,3 +175,39 @@ async def test_streaming_read_obeys_absolute_deadline(monkeypatch):
     )
     assert artifact.acquisition_method == AcquisitionMethod.ERROR
     assert artifact.blocked_reason == "request_error:TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_non_success_http_rejects_extraction_and_uses_snippet(monkeypatch):
+    async def validation(url):
+        return TargetValidation(True, url, host="public.example", resolved_addresses=("93.184.216.34",))
+
+    async def handler(_request):
+        return httpx.Response(404, text="Not found")
+
+    monkeypatch.setattr("app.services.page_analyzer.validate_public_target_async", validation)
+    artifact = await acquire_page(
+        "https://public.example/missing",
+        snippet_fallback="@RareHandle99 public snippet",
+        budget=InvestigationBudget(scan_id="http404"),
+        transport=httpx.MockTransport(handler),
+    )
+    assert artifact.acquisition_method == AcquisitionMethod.SEARCH_SNIPPET
+    assert artifact.metadata["destination_failure_reason"] == "http_404"
+    assert "RareHandle99" in artifact.main_text
+
+
+@pytest.mark.asyncio
+async def test_target_rejection_falls_back_to_snippet(monkeypatch):
+    async def validation(url):
+        return TargetValidation(False, url, reason="dns_resolution_failed")
+
+    monkeypatch.setattr("app.services.page_analyzer.validate_public_target_async", validation)
+    artifact = await acquire_page(
+        "https://gone.example/page",
+        snippet_fallback="Indexed excerpt about RareHandle99",
+        budget=InvestigationBudget(scan_id="dnsfail"),
+    )
+    assert artifact.acquisition_method == AcquisitionMethod.SEARCH_SNIPPET
+    assert artifact.metadata["destination_failure_reason"] == "dns_resolution_failed"
+    assert "RareHandle99" in artifact.main_text

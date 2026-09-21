@@ -84,8 +84,13 @@ def _canonical_from_html(body: str, base_url: str) -> str:
 
 def detect_block_or_challenge(text: str, status: int | None = None) -> str | None:
     blob = (text or "").lower()
-    if status in (401, 403, 429, 503):
-        return f"http_{status}"
+    # Any non-success HTTP status is an acquisition failure — never extract
+    # entities from unrecognized 4xx/5xx bodies as if they were public pages.
+    if status is not None and not (200 <= int(status) < 300):
+        if status in (401, 403, 429, 503):
+            return f"http_{status}"
+        if 400 <= int(status) < 600:
+            return f"http_{status}"
     for m in BLOCK_MARKERS:
         if m in blob:
             return f"challenge:{m}"
@@ -215,6 +220,14 @@ async def acquire_page(
         return _cancelled_artifact(url, scan_id=scan_id)
     validation = await validate_public_target_async(url)
     if not validation.allowed:
+        if snippet_fallback:
+            return artifact_from_snippet(
+                source_url=url,
+                snippet=snippet_fallback,
+                title=title,
+                scan_id=scan_id,
+                destination_failure_reason=validation.reason or "target_rejected",
+            )
         return _rejected_artifact(url, validation, scan_id=scan_id)
     if budget:
         stop = budget.consume_page(url)
@@ -271,6 +284,15 @@ async def acquire_page(
                     timeout=remaining,
                 )
                 if not redirect_validation.allowed:
+                    if snippet_fallback:
+                        return artifact_from_snippet(
+                            source_url=url,
+                            snippet=snippet_fallback,
+                            title=title,
+                            scan_id=scan_id,
+                            destination_failure_reason=redirect_validation.reason
+                            or "redirect_rejected",
+                        )
                     return _rejected_artifact(
                         url,
                         redirect_validation,
