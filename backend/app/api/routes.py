@@ -394,6 +394,10 @@ def scan_detail(scan_id: str):
 
     findings = [row_to_finding(f) for f in data["findings"]]
 
+    from app.services.exposure_scoring import compute_exposure_score
+
+    explanation = compute_exposure_score(findings).as_dict()
+
     return ScanDetail(
 
         id=row["id"],
@@ -411,6 +415,8 @@ def scan_detail(scan_id: str):
         risk_score=row["risk_score"],
 
         findings=findings,
+
+        risk_explanation=explanation,
 
     )
 

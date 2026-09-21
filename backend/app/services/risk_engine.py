@@ -67,7 +67,8 @@ def _resolve_outcome(finding: Finding) -> FindingOutcome:
 
 
 def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
-    combined = f"{finding.title} {finding.description} {finding.snippet} {finding.url}"
+    # Result-derived fields only — description often embeds search-query seeds.
+    combined = f"{finding.title} {finding.snippet} {finding.url}"
     outcome = _resolve_outcome(finding)
     # Prefer explicit verification → outcome when scanners set it.
     if finding.verification and finding.verification.value != "unknown":
@@ -166,8 +167,11 @@ def analyze_finding(finding: Finding, profile: IdentityProfile) -> Finding:
     return finding
 
 
-def compute_risk_score(findings: list[Finding]) -> float:
-    if not findings:
-        return 0.0
-    total = sum(RISK_WEIGHTS.get(f.risk_level, 0) for f in findings)
-    return round(min(100.0, total / len(findings)), 1)
+from app.services.exposure_scoring import compute_exposure_score, compute_risk_score
+
+__all__ = [
+    "RISK_WEIGHTS",
+    "analyze_finding",
+    "compute_risk_score",
+    "compute_exposure_score",
+]

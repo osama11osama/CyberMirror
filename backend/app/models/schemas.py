@@ -103,6 +103,7 @@ class ScanSummary(BaseModel):
 
 class ScanDetail(ScanSummary):
     findings: list[Finding] = Field(default_factory=list)
+    risk_explanation: dict | None = None
 
 
 class DashboardStats(BaseModel):

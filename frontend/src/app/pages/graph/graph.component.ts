@@ -18,6 +18,9 @@ interface NodeDetail {
   platform?: string;
   risk?: string;
   category?: string;
+  verification?: string;
+  role?: string;
+  reason?: string;
 }
 
 @Component({
@@ -39,6 +42,18 @@ interface NodeDetail {
         <option value="">All risks</option>
         <option>Critical</option><option>High</option><option>Medium</option><option>Low</option>
       </select>
+      <select [(ngModel)]="verificationFilter" (ngModelChange)="applyFilter()" class="scan-select">
+        <option value="">All verification</option>
+        <option value="verified">verified</option>
+        <option value="likely">likely</option>
+        <option value="possible">possible</option>
+        <option value="blocked">blocked</option>
+        <option value="derived">derived / correlation</option>
+      </select>
+      <select [(ngModel)]="sourceFilter" (ngModelChange)="applyFilter()" class="scan-select">
+        <option value="">All sources</option>
+        <option *ngFor="let s of sourceOptions" [value]="s">{{ s }}</option>
+      </select>
       <a class="btn-primary" *ngIf="scanId" [routerLink]="['/reports', scanId]">Export Report</a>
     </div>
 
@@ -50,7 +65,8 @@ interface NodeDetail {
           <span><i class="dot email"></i> Email</span>
           <span><i class="dot user"></i> Username</span>
           <span><i class="dot profile"></i> Public Profile</span>
-          <span class="hint">Single-click = info · Double-click = open URL</span>
+          <span><i class="dot corr"></i> Correlation</span>
+          <span class="hint">Seed nodes = search inputs · Discovery = observed evidence</span>
         </div>
       </div>
 
@@ -60,10 +76,12 @@ interface NodeDetail {
           <h3>{{ selected.label }}</h3>
           <button class="close-btn" (click)="clearSelection()" aria-label="Close">×</button>
         </div>
-        <span class="type-badge">{{ selected.type }}</span>
+        <span class="type-badge">{{ selected.type }} · {{ selected.role || 'node' }}</span>
         <p class="detail-row" *ngIf="selected.platform"><strong>Platform</strong> {{ selected.platform }}</p>
         <p class="detail-row" *ngIf="selected.title"><strong>Finding</strong> {{ selected.title }}</p>
         <p class="detail-row" *ngIf="selected.source"><strong>Source</strong> {{ selected.source }}</p>
+        <p class="detail-row" *ngIf="selected.verification"><strong>Verification</strong> {{ selected.verification }}</p>
+        <p class="detail-row" *ngIf="selected.reason"><strong>Reason</strong> {{ selected.reason }}</p>
         <p class="detail-row" *ngIf="selected.risk">
           <strong>Risk</strong>
           <span class="risk-badge" [class]="'risk-' + selected.risk">{{ selected.risk }}</span>
@@ -99,6 +117,7 @@ interface NodeDetail {
     .dot.email { background: #ff6b6b; }
     .dot.user { background: #388bfd; }
     .dot.profile { background: #3fb950; }
+    .dot.corr { background: #a371f7; }
     .detail-panel { padding: 1rem 1.25rem; min-height: 200px; position: sticky; top: 1rem; }
     .detail-panel.empty { text-align: center; color: var(--cm-muted); padding: 2rem 1rem; }
     .detail-panel.empty mat-icon { font-size: 40px; width: 40px; height: 40px; opacity: 0.5; }
@@ -126,6 +145,9 @@ export class GraphComponent implements OnInit, OnDestroy {
   scanId = '';
   scans: any[] = [];
   riskFilter = '';
+  verificationFilter = '';
+  sourceFilter = '';
+  sourceOptions: string[] = [];
   selected: NodeDetail | null = null;
   private cy?: Core;
   private rawGraph: any = null;
@@ -145,6 +167,13 @@ export class GraphComponent implements OnInit, OnDestroy {
     if (!this.scanId) return;
     this.api.graph(this.scanId).subscribe(data => {
       this.rawGraph = data;
+      this.sourceOptions = [
+        ...new Set(
+          (data.nodes || [])
+            .map((n: any) => n.data?.source)
+            .filter((s: string) => !!s)
+        ),
+      ].sort() as string[];
       this.applyFilter();
     });
   }
@@ -152,16 +181,39 @@ export class GraphComponent implements OnInit, OnDestroy {
   applyFilter() {
     if (!this.rawGraph) return;
     let data = this.rawGraph;
+    const evidenceTypes = new Set(['Finding', 'PublicProfile', 'Correlation']);
+    let nodes = data.nodes as any[];
+
     if (this.riskFilter) {
       const allowed = new Set(
-        data.nodes.filter((n: any) => n.type === 'Finding' && n.data?.risk === this.riskFilter).map((n: any) => n.id)
+        nodes
+          .filter((n: any) => evidenceTypes.has(n.type) && n.data?.risk === this.riskFilter)
+          .map((n: any) => n.id)
       );
-      const nodes = data.nodes.filter((n: any) => n.type !== 'Finding' || allowed.has(n.id));
-      const ids = new Set(nodes.map((n: any) => n.id));
-      const edges = data.edges.filter((e: any) => ids.has(e.source) && ids.has(e.target));
-      data = { nodes, edges };
+      nodes = nodes.filter((n: any) => !evidenceTypes.has(n.type) || allowed.has(n.id));
     }
-    this.renderGraph(data);
+    if (this.verificationFilter === 'derived') {
+      nodes = nodes.filter(
+        (n: any) =>
+          !evidenceTypes.has(n.type) ||
+          n.data?.role === 'derived' ||
+          n.type === 'Correlation'
+      );
+    } else if (this.verificationFilter) {
+      nodes = nodes.filter(
+        (n: any) =>
+          !evidenceTypes.has(n.type) ||
+          n.data?.verification === this.verificationFilter
+      );
+    }
+    if (this.sourceFilter) {
+      nodes = nodes.filter(
+        (n: any) => !evidenceTypes.has(n.type) || n.data?.source === this.sourceFilter
+      );
+    }
+    const ids = new Set(nodes.map((n: any) => n.id));
+    const edges = data.edges.filter((e: any) => ids.has(e.source) && ids.has(e.target));
+    this.renderGraph({ nodes, edges });
   }
 
   ngOnDestroy() {
@@ -187,6 +239,9 @@ export class GraphComponent implements OnInit, OnDestroy {
       platform: d.platform,
       risk: d.risk,
       category: d.category,
+      verification: d.verification,
+      role: d.role,
+      reason: d.reason,
     };
   }
 
@@ -201,7 +256,7 @@ export class GraphComponent implements OnInit, OnDestroy {
     const typeColors: Record<string, string> = {
       Person: '#ffa657', Email: '#ff6b6b', Username: '#388bfd',
       Phone: '#f0c040', Website: '#79c0ff', Location: '#8b949e',
-      PublicProfile: '#3fb950', Finding: '#6e7681',
+      PublicProfile: '#3fb950', Finding: '#6e7681', Correlation: '#a371f7',
     };
 
     const elements = [

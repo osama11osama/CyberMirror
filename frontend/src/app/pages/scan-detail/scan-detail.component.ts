@@ -50,6 +50,14 @@ import { ApiService } from '../../services/api.service';
         </div>
       </div>
 
+      <div class="card explain" *ngIf="scan.risk_explanation">
+        <div class="card-header"><mat-icon>insights</mat-icon><h3>Exposure score explanation</h3></div>
+        <p class="muted">{{ scan.risk_explanation.disclaimer }}</p>
+        <ul>
+          <li *ngFor="let r of scan.risk_explanation.reasons">{{ r }}</li>
+        </ul>
+      </div>
+
       <div class="card profile-card">
         <div class="card-header"><mat-icon>person</mat-icon><h3>Profile searched</h3></div>
         <div class="profile-grid">
@@ -119,6 +127,8 @@ import { ApiService } from '../../services/api.service';
     .toolbar { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1rem; }
     .stat { padding: 1rem 1.25rem; }
+    .explain { margin-bottom: 1rem; padding: 1rem 1.25rem; }
+    .explain ul { margin: 0.5rem 0 0; padding-left: 1.2rem; color: var(--cm-muted); font-size: 0.9rem; }
     .stat .label { display: block; font-size: 0.75rem; color: var(--cm-muted); text-transform: uppercase; margin-bottom: 0.35rem; }
     .stat .value { font-size: 1.35rem; font-weight: 600; }
     .stat .value.sm { font-size: 0.95rem; font-weight: 500; }
