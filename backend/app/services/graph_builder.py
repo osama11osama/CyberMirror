@@ -220,3 +220,109 @@ def build_graph(profile: IdentityProfile, findings: list[Finding]) -> GraphData:
                 ))
 
     return GraphData(nodes=nodes, edges=edges)
+
+
+def enrich_graph_with_intelligence(graph: GraphData, intel: dict) -> GraphData:
+    """Add entity/event/hypothesis/cluster nodes from a v2.5 intelligence payload."""
+    nodes = list(graph.nodes)
+    edges = list(graph.edges)
+    existing = {n.id for n in nodes}
+
+    def add(nid: str, label: str, ntype: str, **data) -> None:
+        if nid in existing:
+            return
+        existing.add(nid)
+        nodes.append(GraphNode(id=nid, label=label, type=ntype, data=data))
+
+    for ent in intel.get("bundle", {}).get("entities") or []:
+        eid = ent.get("id") or ""
+        if not eid:
+            continue
+        origin = ent.get("origin") or "observed"
+        add(
+            f"ent:{eid}",
+            (ent.get("original_value") or ent.get("normalized_value") or ent.get("type") or "entity")[:60],
+            "Entity",
+            role="seed" if origin == "seed" else ("derived" if origin == "derived" else "discovered"),
+            entity_type=ent.get("type"),
+            confidence=ent.get("confidence"),
+            origin=origin,
+            evidence_ids=ent.get("supporting_evidence_ids") or [],
+        )
+
+    for ev in intel.get("bundle", {}).get("events") or []:
+        eid = ev.get("id") or ""
+        if not eid:
+            continue
+        add(
+            f"event:{eid}",
+            (ev.get("title") or ev.get("type") or "event")[:60],
+            "Event",
+            role="derived" if ev.get("origin") == "derived" else "discovered",
+            event_type=ev.get("type"),
+            confidence=ev.get("confidence"),
+            location=ev.get("location_text") or "",
+            evidence_ids=ev.get("supporting_evidence_ids") or [],
+            reason=ev.get("derivation_reason") or "",
+        )
+        for rid in ev.get("related_entity_ids") or []:
+            if f"ent:{rid}" in existing:
+                edges.append(
+                    GraphEdge(
+                        id=f"ev-ent-{eid}-{rid}",
+                        source=f"event:{eid}",
+                        target=f"ent:{rid}",
+                        label="mentions",
+                    )
+                )
+        loc = ev.get("location_entity_id")
+        if loc and f"ent:{loc}" in existing:
+            edges.append(
+                GraphEdge(
+                    id=f"ev-loc-{eid}",
+                    source=f"event:{eid}",
+                    target=f"ent:{loc}",
+                    label="occurred at",
+                )
+            )
+
+    for hyp in intel.get("hypotheses") or []:
+        hid = hyp.get("id") or ""
+        cand = hyp.get("candidate_entity_id") or ""
+        if not hid:
+            continue
+        add(
+            f"hyp:{hid}",
+            f"Identity {hyp.get('status', 'unresolved')}: {hyp.get('candidate_value', '')}"[:70],
+            "Hypothesis",
+            role="derived",
+            status=hyp.get("status"),
+            confidence=hyp.get("confidence"),
+            reasons=hyp.get("reasons") or [],
+            evidence_ids=hyp.get("supporting_evidence_ids") or [],
+        )
+        if cand and f"ent:{cand}" in existing:
+            edges.append(
+                GraphEdge(
+                    id=f"hyp-ent-{hid}",
+                    source=f"hyp:{hid}",
+                    target=f"ent:{cand}",
+                    label="hypothesized ownership",
+                )
+            )
+
+    for cl in intel.get("clusters") or []:
+        cid = cl.get("id") or ""
+        if not cid:
+            continue
+        add(
+            f"cluster:{cid}",
+            f"Evidence cluster ({cl.get('lineage_type', 'unknown')})",
+            "EvidenceCluster",
+            role="derived",
+            independent=cl.get("independent_source_count"),
+            mirrors=cl.get("mirror_count"),
+            reason=cl.get("reason") or "",
+        )
+
+    return GraphData(nodes=nodes, edges=edges)

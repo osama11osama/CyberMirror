@@ -24,8 +24,8 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "CyberMirror"
-    app_version: str = "2.4.0"
-    app_release_name: str = "Correlation"
+    app_version: str = "2.5.0"
+    app_release_name: str = "Deep Intelligence"
     host: str = "127.0.0.1"
     port: int = 8787
     debug: bool = False

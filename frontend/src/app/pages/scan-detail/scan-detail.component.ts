@@ -72,6 +72,53 @@ import { ApiService } from '../../services/api.service';
         <p class="muted modules">Modules: {{ scan.providers?.join(', ') }}</p>
       </div>
 
+      <div class="card intel" *ngIf="intelLoading">
+        <mat-icon>hourglass_top</mat-icon> Building deep intelligence…
+      </div>
+
+      <div class="card intel" *ngIf="intel">
+        <div class="card-header"><mat-icon>psychology</mat-icon><h3>Deep Intelligence</h3>
+          <button type="button" class="btn-secondary sm" (click)="loadIntel(true)">Refresh</button>
+        </div>
+        <p class="muted">Identity hypotheses are not factual ownership claims. Stay dates stay separate from review dates.</p>
+
+        <h4>Identity hypotheses</h4>
+        <ul class="intel-list" *ngIf="intel.hypotheses?.length; else noHyp">
+          <li *ngFor="let h of intel.hypotheses">
+            <strong>{{ h.candidate_value }}</strong>
+            <span class="verify-badge">{{ h.status }}</span>
+            <span class="muted"> conf {{ h.confidence }}</span>
+            <div class="snippet">{{ (h.reasons || []).join(' · ') }}</div>
+          </li>
+        </ul>
+        <ng-template #noHyp><p class="muted">No hypotheses yet.</p></ng-template>
+
+        <h4>Timeline</h4>
+        <ul class="intel-list" *ngIf="intel.timeline?.dated?.length; else noTl">
+          <li *ngFor="let e of intel.timeline.dated">
+            <strong>{{ e.date_label }}</strong>
+            <span class="muted"> ({{ e.precision }})</span>
+            — {{ e.event_type }}: {{ e.description }}
+            <span class="verify-badge">{{ e.verification_label }}</span>
+          </li>
+        </ul>
+        <ng-template #noTl><p class="muted">No dated timeline events.</p></ng-template>
+        <div *ngIf="intel.timeline?.unknown_date?.length">
+          <h4>Unknown-date events</h4>
+          <ul class="intel-list">
+            <li *ngFor="let e of intel.timeline.unknown_date">{{ e.event_type }}: {{ e.description }}</li>
+          </ul>
+        </div>
+
+        <h4>Investigation Journal</h4>
+        <ol class="intel-list journal" *ngIf="intel.journal?.steps?.length">
+          <li *ngFor="let s of intel.journal.steps">
+            <strong>{{ s.step_type }}</strong> — {{ s.reason }}
+            <span class="muted" *ngIf="s.status !== 'ok'"> [{{ s.status }}]</span>
+          </li>
+        </ol>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <mat-icon>fact_check</mat-icon>
@@ -145,12 +192,19 @@ import { ApiService } from '../../services/api.service';
     .rec { font-size: 0.85rem; max-width: 220px; }
     .muted { color: var(--cm-muted); }
     .loading, .error { padding: 2rem; text-align: center; color: var(--cm-muted); }
+    .intel { margin-bottom: 1rem; padding: 1rem 1.25rem; }
+    .intel h4 { margin: 1rem 0 0.4rem; font-size: 0.95rem; }
+    .intel-list { margin: 0.35rem 0 0; padding-left: 1.2rem; font-size: 0.9rem; }
+    .intel-list.journal { padding-left: 1.4rem; }
+    .btn-secondary.sm { margin-left: auto; padding: 0.25rem 0.6rem; font-size: 0.8rem; }
     @media (max-width: 900px) { .meta-grid { grid-template-columns: 1fr 1fr; } }
   `],
 })
 export class ScanDetailComponent implements OnInit {
   scanId = '';
   scan: any = null;
+  intel: any = null;
+  intelLoading = false;
   loading = true;
   error = '';
   filterText = '';
@@ -170,10 +224,24 @@ export class ScanDetailComponent implements OnInit {
       next: (data) => {
         this.scan = data;
         this.loading = false;
+        this.loadIntel(false);
       },
       error: () => {
         this.error = 'Scan not found — it may have been deleted';
         this.loading = false;
+      },
+    });
+  }
+
+  loadIntel(refresh: boolean) {
+    this.intelLoading = true;
+    this.api.intelligence(this.scanId, refresh).subscribe({
+      next: (data) => {
+        this.intel = data;
+        this.intelLoading = false;
+      },
+      error: () => {
+        this.intelLoading = false;
       },
     });
   }

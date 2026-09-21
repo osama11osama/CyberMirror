@@ -44,8 +44,6 @@ from app.models.schemas import (
 
 from app.modules.registry import DEFAULT_MODULES, list_modules
 
-from app.services.graph_builder import build_graph
-
 from app.services.logging_setup import setup_logging
 
 from app.services.report_exporter import export_csv, export_html, export_json, export_pdf
@@ -67,9 +65,11 @@ from app.storage.database import (
     get_scan,
     init_db,
     list_scans,
+    load_intelligence,
     profile_from_row,
     risk_trends,
     row_to_finding,
+    save_intelligence,
     sync_risk_score,
 )
 from app.modules.username.wmn_loader import wmn_status
@@ -493,7 +493,113 @@ def scan_graph(scan_id: str):
 
     findings = [row_to_finding(f) for f in data["findings"]]
 
-    return build_graph(profile, findings)
+    intel = load_intelligence(scan_id)
+
+    from app.services.graph_builder import build_graph, enrich_graph_with_intelligence
+
+    graph = build_graph(profile, findings)
+
+    if intel:
+
+        graph = enrich_graph_with_intelligence(graph, intel)
+
+    return graph
+
+
+
+
+
+@router.get("/scans/{scan_id}/intelligence")
+
+def scan_intelligence(scan_id: str, refresh: bool = Query(False)):
+
+    data = get_scan(scan_id)
+
+    if not data:
+
+        raise HTTPException(404, "Scan not found")
+
+    existing = None if refresh else load_intelligence(scan_id)
+
+    if existing:
+
+        return existing
+
+    profile = profile_from_row(data["scan"])
+
+    findings = [row_to_finding(f) for f in data["findings"]]
+
+    from app.services.intelligence_pipeline import analyze_finding_pages
+
+    payload = analyze_finding_pages(profile, findings, scan_id=scan_id)
+
+    save_intelligence(scan_id, payload)
+
+    return payload
+
+
+
+
+
+@router.get("/scans/{scan_id}/timeline")
+
+def scan_timeline(scan_id: str):
+
+    intel = scan_intelligence(scan_id)
+
+    return intel.get("timeline") or {"dated": [], "unknown_date": []}
+
+
+
+
+
+@router.get("/scans/{scan_id}/journal")
+
+def scan_journal(scan_id: str):
+
+    intel = scan_intelligence(scan_id)
+
+    return intel.get("journal") or {"scan_id": scan_id, "steps": []}
+
+
+
+
+
+@router.get("/investigation/budget/defaults")
+
+def budget_defaults():
+
+    from app.services.investigation_budget import FORBIDDEN_CAPABILITIES, default_budget
+
+    return default_budget("preview").as_dict() | {
+
+        "forbidden_capabilities": list(FORBIDDEN_CAPABILITIES),
+
+    }
+
+
+
+
+
+@router.get("/scans/{scan_id}/artifacts")
+
+def list_scan_artifacts(scan_id: str):
+
+    from app.services.investigation_budget import list_deep_artifacts
+
+    return {"scan_id": scan_id, "files": list_deep_artifacts(scan_id)}
+
+
+
+
+
+@router.delete("/scans/{scan_id}/artifacts")
+
+def delete_scan_artifacts(scan_id: str):
+
+    from app.services.investigation_budget import delete_deep_artifacts
+
+    return {"deleted": delete_deep_artifacts(scan_id)}
 
 
 
@@ -597,11 +703,13 @@ def export_scan(scan_id: str, body: ExportRequest):
 
     path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.{ext}"
 
+    intel = load_intelligence(scan_id)
+
 
 
     if ext == "json":
 
-        export_json(summary, findings, path)
+        export_json(summary, findings, path, intelligence=intel)
 
     elif ext == "csv":
 
@@ -609,11 +717,11 @@ def export_scan(scan_id: str, body: ExportRequest):
 
     elif ext == "html":
 
-        export_html(summary, findings, path)
+        export_html(summary, findings, path, intelligence=intel)
 
     elif ext == "pdf":
 
-        export_pdf(summary, findings, path)
+        export_pdf(summary, findings, path, intelligence=intel)
 
     else:
 
@@ -667,11 +775,13 @@ def download_export(scan_id: str, format: str):
 
     path = settings.exports_dir / f"cybermirror_{scan_id[:8]}.{ext}"
 
+    intel = load_intelligence(scan_id)
+
 
 
     if ext == "json":
 
-        export_json(summary, findings, path)
+        export_json(summary, findings, path, intelligence=intel)
 
     elif ext == "csv":
 
@@ -679,11 +789,11 @@ def download_export(scan_id: str, format: str):
 
     elif ext == "html":
 
-        export_html(summary, findings, path)
+        export_html(summary, findings, path, intelligence=intel)
 
     elif ext == "pdf":
 
-        export_pdf(summary, findings, path)
+        export_pdf(summary, findings, path, intelligence=intel)
 
     else:
 

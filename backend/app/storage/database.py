@@ -40,6 +40,10 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE scans ADD COLUMN scoring_version INTEGER NOT NULL DEFAULT 0"
         )
+    if "intelligence_json" not in cols:
+        conn.execute(
+            "ALTER TABLE scans ADD COLUMN intelligence_json TEXT NOT NULL DEFAULT ''"
+        )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_scan_id ON findings(scan_id)"
     )
@@ -269,6 +273,31 @@ def save_findings(findings: list[Finding]) -> None:
             ],
         )
         conn.commit()
+
+
+def save_intelligence(scan_id: str, payload: dict) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE scans SET intelligence_json=? WHERE id=?",
+            (json.dumps(payload), scan_id),
+        )
+        conn.commit()
+
+
+def load_intelligence(scan_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT intelligence_json FROM scans WHERE id=?", (scan_id,)
+        ).fetchone()
+    if not row:
+        return None
+    raw = row["intelligence_json"] or ""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
 
 
 def list_scans(limit: int = 50, offset: int = 0) -> list[ScanSummary]:
