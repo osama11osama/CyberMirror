@@ -14,7 +14,7 @@ def test_health_is_public_and_reports_version(isolated_app):
     body = r.json()
     assert body["status"] == "ok"
     assert body["version"] == "2.5.0"
-    assert body["release_name"] == "Correlation"
+    assert body["release_name"] == "Deep Intelligence"
     assert "api_token" not in body
 
 
